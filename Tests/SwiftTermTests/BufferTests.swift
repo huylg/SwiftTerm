@@ -24,6 +24,32 @@ final class BufferTests: TerminalDelegate {
         #expect(String(decoding: terminal.getBufferAsData(), as: UTF8.self) == text + "\n")
     }
 
+    /// Shrinking rows keeps text below the cursor and scrolls the top into history,
+    /// as Ghostty does, so a TUI's relative redraw lands on the same rows.
+    @Test func shrinkingRowsKeepsTextBelowCursor() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 10, rows: 6, scrollback: 100))
+        terminal.feed(text: "a\r\nb\r\nprompt\r\nstatus1\r\nstatus2")
+        terminal.feed(text: "\u{1b}[3;1H") // cursor back on the prompt
+        terminal.resize(cols: 10, rows: 3)
+
+        let buffer = terminal.buffer
+        #expect(buffer.y == 0)
+        #expect(buffer.yBase == 2)
+        #expect(terminal.getLine(row: 0)?.translateToString(trimRight: true) == "prompt")
+        #expect(terminal.getLine(row: 2)?.translateToString(trimRight: true) == "status2")
+    }
+
+    @Test func shrinkingRowsTrimsBlankLinesFirst() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 10, rows: 6, scrollback: 100))
+        terminal.feed(text: "a\r\nb")
+        terminal.resize(cols: 10, rows: 3)
+
+        let buffer = terminal.buffer
+        #expect(buffer.y == 1)
+        #expect(buffer.yBase == 0)
+        #expect(terminal.getLine(row: 0)?.translateToString(trimRight: true) == "a")
+    }
+
     @Test func getBufferAsDataConvertsEmptyCellsToSpaces() {
         let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 12, rows: 1, scrollback: 0))
         terminal.feed(text: "\u{1b}[10Gx")

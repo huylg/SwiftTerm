@@ -963,18 +963,25 @@ public final class Buffer {
                     }
                 }
             } else { // (this._rows >= newRows)
+                // Like Ghostty: trim blank lines from the bottom while they sit below
+                // the cursor, then push the top of the screen into scrollback. Lines
+                // with text below the cursor (a TUI's status rows) are kept, so the
+                // cursor stays on the same line it was on.
+                var scrolled = 0
                 for _ in (newRows..<rows).reversed () {
                     if lines.count > newRows + yBase {
-                        if lines.count > yBase + self.y + 1 {
+                        if lines.count > yBase + self.y + 1 && lines [lines.count - 1].getTrimmedLength () == 0 {
                             // The line is a blank line below the cursor, remove it
                             lines.pop ()
                         } else {
-                            // The line is the cursor, scroll down
+                            // Scroll the top line into scrollback
                             yBase += 1
                             yDisp += 1
+                            scrolled += 1
                         }
                     }
                 }
+                self.y = max (self.y - scrolled, 0)
             }
 
             // Reduce max length if needed after adjustments, this is done after as it
