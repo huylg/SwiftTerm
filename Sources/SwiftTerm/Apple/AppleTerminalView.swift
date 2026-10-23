@@ -565,6 +565,15 @@ struct FrameViewState: Sendable {
     let minimumContrastRatio: CGFloat
     let bidiHostPolicy: BidiHostPolicy
     let glyphFallbackProvider: (any TerminalGlyphFallbackProvider)?
+    /// True when the renderer draws rows at the scroll view's exact offset,
+    /// part way into a row (the iOS Metal path). The snapshot then keeps the
+    /// rows just outside the viewport for the edges that offset uncovers.
+    let smoothScrollRows: Bool
+    /// The scroll view's content offset while a person scrolls it: dragging,
+    /// coasting, or resting in the history. Nil while it follows the output;
+    /// the renderer then places rows where the view comes to rest, because
+    /// the offset trails the terminal by a frame when output arrives.
+    let liveScrollOffsetY: CGFloat?
 
     var effectiveForegroundColor: FrameColor { appearance.effectiveForegroundColor }
     var effectiveBackgroundColor: FrameColor { appearance.effectiveBackgroundColor }
@@ -607,6 +616,14 @@ struct FrameViewState: Sendable {
         minimumContrastRatio = view.minimumContrastRatio
         bidiHostPolicy = view.bidiHostPolicy
         glyphFallbackProvider = view.glyphFallbackProvider
+#if os(macOS)
+        smoothScrollRows = false
+        liveScrollOffsetY = nil
+#else
+        smoothScrollRows = view.isUsingMetalRenderer
+        let scrolling = view.isTracking || view.isDecelerating || view.userScrolling
+        liveScrollOffsetY = scrolling ? view.contentOffset.y : nil
+#endif
     }
 }
 
@@ -651,6 +668,7 @@ struct SnapshotRenderContext {
     let fonts: FrameFontSet
     let cellDimension: TerminalView.CellDimension
     let viewBounds: CGRect
+    let liveScrollOffsetY: CGFloat?
     let renderingScale: CGFloat
     let imageScale: CGFloat
     let metalBufferingMode: MetalBufferingMode
@@ -714,6 +732,7 @@ struct SnapshotRenderContext {
         fonts = viewState.fonts
         cellDimension = viewState.cellDimension
         viewBounds = viewState.viewBounds
+        liveScrollOffsetY = viewState.liveScrollOffsetY
         renderingScale = viewState.renderingScale
         fontSmoothing = viewState.fontSmoothing
         cursorHasFocus = viewState.cursorHasFocus

@@ -376,7 +376,12 @@ final class TerminalSnapshot {
         let bidiInputsChanged = previousBidiHostPolicy != viewState.bidiHostPolicy ||
             previousBidiFont != bidiFont
 
-        firstRow = buffer.yDisp
+        // A view drawn at its exact scroll offset can sit part way into a row,
+        // and up to almost two rows above it while it follows the bottom. Keep
+        // the rows that offset brings into view.
+        let rowsAbove = viewState.smoothScrollRows ? min(2, buffer.yDisp) : 0
+        let rowsBelow = viewState.smoothScrollRows ? 1 : 0
+        firstRow = buffer.yDisp - rowsAbove
         yDisp = buffer.yDisp
         yBase = buffer.yBase
         x = buffer.x
@@ -394,7 +399,8 @@ final class TerminalSnapshot {
         style = newStyle
         ansiColors = terminal.ansiColors
 
-        let visibleCount = max(0, min(buffer.rows, buffer.lines.count - firstRow))
+        let visibleCount = max(0, min(rowsAbove + buffer.rows + rowsBelow,
+                                      buffer.lines.count - firstRow))
         while rows.count > visibleCount {
             rowPool.append(rows.removeLast())
         }

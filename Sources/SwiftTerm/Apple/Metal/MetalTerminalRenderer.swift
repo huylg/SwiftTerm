@@ -1467,6 +1467,17 @@ final class MetalTerminalRenderer {
         }
         bufferPool.beginFrame()
         let viewport = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+        // Rows are laid out from the top visible row. Moving the whole pass by
+        // the part of a row the view is scrolled past puts every cell, image,
+        // and the cursor where the scroll view has them, so a slow drag glides
+        // instead of stepping one row at a time.
+        let scrollShift = (smoothScrollShift(snapshot: snapshot, context: renderContext) * scale).rounded()
+        if scrollShift != 0 {
+            encoder.setViewport(MTLViewport(originX: 0, originY: Double(-scrollShift),
+                                            width: Double(drawableSize.width),
+                                            height: Double(drawableSize.height),
+                                            znear: 0, zfar: 1))
+        }
 
         if let frame = drawData.frame {
             drawFrameData(frame, encoder: encoder, viewport: viewport)
@@ -1880,14 +1891,33 @@ final class MetalTerminalRenderer {
                         cursorGlyphVerticesColor: cursorData.glyphVerticesColor)
     }
 
+    /// How far, in points, the view is scrolled past the top of its top
+    /// visible row. Negative while it rests flush against the bottom, where
+    /// the grid's last row ends at the view's bottom edge.
+    private func smoothScrollShift(snapshot: TerminalSnapshot,
+                                   context: SnapshotRenderContext) -> CGFloat {
+#if os(macOS)
+        return 0
+#else
+        let cellHeight = context.cellDimension.height
+        guard cellHeight > 0 else { return 0 }
+        let top = CGFloat(snapshot.yDisp) * cellHeight
+        // Where a view that follows the output rests: the top row's offset,
+        // or the bottom of the content when that is reached first.
+        let resting = min(top, max(0, CGFloat(snapshot.linesCount) * cellHeight - context.viewBounds.height))
+        return (context.liveScrollOffsetY ?? resting) - top
+#endif
+    }
+
     private func visibleRowRange(snapshot: TerminalSnapshot) -> (Int, Int, Int)? {
         guard snapshot.linesCount > 0, snapshot.rowCount > 0,
               !snapshot.rows.isEmpty else {
             return nil
         }
+        // The snapshot can hold rows just outside the viewport for smooth
+        // scrolling; draw all of them.
         let firstRow = snapshot.firstRow
-        let lastRow = min(snapshot.linesCount - 1,
-                          firstRow + min(snapshot.rowCount, snapshot.rows.count) - 1)
+        let lastRow = min(snapshot.linesCount - 1, firstRow + snapshot.rows.count - 1)
         guard firstRow <= lastRow else { return nil }
         return (firstRow, lastRow, snapshot.yDisp)
     }
