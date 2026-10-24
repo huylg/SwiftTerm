@@ -379,8 +379,8 @@ final class TerminalSnapshot {
         // A view drawn at its exact scroll offset can sit part way into a row,
         // and up to almost two rows above it while it follows the bottom. Keep
         // the rows that offset brings into view.
-        let rowsAbove = viewState.smoothScrollRows ? min(2, buffer.yDisp) : 0
-        let rowsBelow = viewState.smoothScrollRows ? 1 : 0
+        let rowsAbove = viewState.smoothScrollRows ? min(FrameViewState.smoothScrollRowsAbove, buffer.yDisp) : 0
+        let rowsBelow = viewState.smoothScrollRows ? FrameViewState.smoothScrollRowsBelow : 0
         firstRow = buffer.yDisp - rowsAbove
         yDisp = buffer.yDisp
         yBase = buffer.yBase
