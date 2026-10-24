@@ -569,6 +569,11 @@ struct FrameViewState: Sendable {
     /// part way into a row (the iOS Metal path). The snapshot then keeps the
     /// rows just outside the viewport for the edges that offset uncovers.
     let smoothScrollRows: Bool
+    /// The rows kept above and below the viewport when `smoothScrollRows` is
+    /// set: up to almost two above while the view rests flush with the
+    /// bottom, one below while it sits part way into its top row.
+    static let smoothScrollRowsAbove = 2
+    static let smoothScrollRowsBelow = 1
     /// The scroll view's content offset while a person scrolls it: dragging,
     /// coasting, or resting in the history. Nil while it follows the output;
     /// the renderer then places rows where the view comes to rest, because
@@ -669,6 +674,11 @@ struct SnapshotRenderContext {
     let cellDimension: TerminalView.CellDimension
     let viewBounds: CGRect
     let liveScrollOffsetY: CGFloat?
+    /// Rows the renderer keeps drawable above and below the viewport, so the
+    /// ones a part-row scroll offset uncovers are not clipped away. Zero
+    /// unless the renderer scrolls by pixels.
+    let smoothScrollRowsAbove: Int
+    let smoothScrollRowsBelow: Int
     let renderingScale: CGFloat
     let imageScale: CGFloat
     let metalBufferingMode: MetalBufferingMode
@@ -733,6 +743,8 @@ struct SnapshotRenderContext {
         cellDimension = viewState.cellDimension
         viewBounds = viewState.viewBounds
         liveScrollOffsetY = viewState.liveScrollOffsetY
+        smoothScrollRowsAbove = viewState.smoothScrollRows ? FrameViewState.smoothScrollRowsAbove : 0
+        smoothScrollRowsBelow = viewState.smoothScrollRows ? FrameViewState.smoothScrollRowsBelow : 0
         renderingScale = viewState.renderingScale
         fontSmoothing = viewState.fontSmoothing
         cursorHasFocus = viewState.cursorHasFocus

@@ -1466,16 +1466,24 @@ final class MetalTerminalRenderer {
             }
         }
         bufferPool.beginFrame()
-        let viewport = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
         // Rows are laid out from the top visible row. Moving the whole pass by
         // the part of a row the view is scrolled past puts every cell, image,
         // and the cursor where the scroll view has them, so a slow drag glides
         // instead of stepping one row at a time.
+        //
+        // Clipping happens before the viewport moves the pass, so the pass
+        // also covers the rows kept above and below the viewport. Rows are
+        // laid out over a layout height that already includes the ones below;
+        // the ones above get room at the top of the pass.
         let scrollShift = (smoothScrollShift(snapshot: snapshot, context: renderContext) * scale).rounded()
-        if scrollShift != 0 {
-            encoder.setViewport(MTLViewport(originX: 0, originY: Double(-scrollShift),
+        let rowsAbovePx = (CGFloat(renderContext.smoothScrollRowsAbove) * renderContext.cellDimension.height * scale).rounded()
+        let rowsBelowPx = (layoutHeight(renderContext) - renderContext.viewBounds.height) * scale
+        let passHeight = drawableSize.height + rowsBelowPx + rowsAbovePx
+        let viewport = SIMD2<Float>(Float(drawableSize.width), Float(passHeight))
+        if passHeight != drawableSize.height || scrollShift != 0 {
+            encoder.setViewport(MTLViewport(originX: 0, originY: Double(-scrollShift - rowsAbovePx),
                                             width: Double(drawableSize.width),
-                                            height: Double(drawableSize.height),
+                                            height: Double(passHeight),
                                             znear: 0, zfar: 1))
         }
 
@@ -1713,7 +1721,7 @@ final class MetalTerminalRenderer {
                                        cellWidth: Double(cellWidth),
                                        cellHeight: Double(cellHeight),
                                        viewWidth: Double(context.viewBounds.width),
-                                       viewHeight: Double(context.viewBounds.height),
+                                       viewHeight: Double(layoutHeight(context)),
                                        rows: snapshot.rowCount,
                                        cols: snapshot.cols,
                                        fontName: context.fonts.normal.fontName,
@@ -1907,6 +1915,12 @@ final class MetalTerminalRenderer {
         let resting = min(top, max(0, CGFloat(snapshot.linesCount) * cellHeight - context.viewBounds.height))
         return (context.liveScrollOffsetY ?? resting) - top
 #endif
+    }
+
+    /// The height rows are laid out over, bottom up: the view, plus the rows
+    /// kept below it for smooth scrolling.
+    private func layoutHeight(_ context: SnapshotRenderContext) -> CGFloat {
+        context.viewBounds.height + CGFloat(context.smoothScrollRowsBelow) * context.cellDimension.height
     }
 
     private func visibleRowRange(snapshot: TerminalSnapshot) -> (Int, Int, Int)? {
@@ -2509,7 +2523,7 @@ final class MetalTerminalRenderer {
 
         let renderMode = prepared.renderMode
         let lineOffset = cellHeight * CGFloat(screenRow + 1)
-        let lineOrigin = CGPoint(x: 0, y: context.viewBounds.height - lineOffset)
+        let lineOrigin = CGPoint(x: 0, y: layoutHeight(context) - lineOffset)
         let rowBase = lineOrigin.y + cellHeight
         let lineOriginPx = CGPoint(x: lineOrigin.x * scale, y: lineOrigin.y * scale)
         let cellWidthPx = cellWidth * scale
@@ -3951,7 +3965,7 @@ final class MetalTerminalRenderer {
             return ([], [], [])
         }
         let lineOffset = cellHeight * CGFloat(cursorRow - yDisp + 1)
-        let lineOrigin = CGPoint(x: 0, y: context.viewBounds.height - lineOffset)
+        let lineOrigin = CGPoint(x: 0, y: layoutHeight(context) - lineOffset)
         let lineOriginPx = CGPoint(x: lineOrigin.x * scale, y: lineOrigin.y * scale)
         let cellWidthPx = cellWidth * scale
         let cellHeightPx = cellHeight * scale
