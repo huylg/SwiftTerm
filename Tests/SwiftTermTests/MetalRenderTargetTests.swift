@@ -57,7 +57,7 @@ struct MetalRenderTargetTests {
 
         guard let frame = view.acquireDrawableFrame() else { return }
         let descriptor = frame.renderPassDescriptor
-        #expect(descriptor.colorAttachments[0].texture === frame.drawable.texture)
+        #expect(descriptor.colorAttachments[0].texture === frame.texture)
         #expect(descriptor.colorAttachments[0].loadAction == .clear)
         #expect(descriptor.colorAttachments[0].storeAction == .store)
     }
