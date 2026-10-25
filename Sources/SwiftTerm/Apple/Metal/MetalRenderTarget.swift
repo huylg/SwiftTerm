@@ -31,14 +31,38 @@ struct MetalSurfaceGeometry: Sendable, Equatable {
     let contentsScale: CGFloat
 }
 
-/// A drawable and its immutable render state.
+/// A texture to render one frame into, its immutable render state, and how the
+/// frame reaches the screen.
 ///
 /// The producer and renderer use this value synchronously on one thread. The
 /// Metal objects do not cross an additional concurrency boundary here.
 struct MetalDrawableFrame {
-    let drawable: any CAMetalDrawable
+    let texture: MTLTexture
     let renderPassDescriptor: MTLRenderPassDescriptor
     let geometry: MetalSurfaceGeometry
+    /// Schedules the frame for display. Called once, before the command
+    /// buffer that renders it is committed.
+    let present: (MTLCommandBuffer) -> Void
+
+    init(texture: MTLTexture,
+         renderPassDescriptor: MTLRenderPassDescriptor,
+         geometry: MetalSurfaceGeometry,
+         present: @escaping (MTLCommandBuffer) -> Void) {
+        self.texture = texture
+        self.renderPassDescriptor = renderPassDescriptor
+        self.geometry = geometry
+        self.present = present
+    }
+
+    /// A `CAMetalLayer` drawable, presented through the layer's own queue.
+    init(drawable: any CAMetalDrawable,
+         renderPassDescriptor: MTLRenderPassDescriptor,
+         geometry: MetalSurfaceGeometry) {
+        self.init(texture: drawable.texture,
+                  renderPassDescriptor: renderPassDescriptor,
+                  geometry: geometry,
+                  present: { $0.present(drawable) })
+    }
 }
 
 /// The part of a surface that the render thread can use.
