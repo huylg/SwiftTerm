@@ -782,6 +782,29 @@ public final class Buffer {
         cellArena.pack(attribute: attribute, scalar: 0, widthState: .narrow)!
     }
     
+    /// Adds `history` above the oldest row, oldest first, the way a restored
+    /// snapshot's scrollback arrives newest page first. What the viewport shows
+    /// stays put: `yBase` and `yDisp` move down by the rows added.
+    ///
+    /// Only rows that fit under the scrollback limit are added, newest first, so a
+    /// full buffer takes none. Rows of another width are skipped. Returns how many
+    /// rows were added.
+    @discardableResult
+    func prependHistory (_ history: [BufferLine]) -> Int
+    {
+        let room = _lines.maxLength - _lines.count
+        guard room > 0 else { return 0 }
+        let fitting = history.suffix(room).filter { $0.count == cols }
+        guard !fitting.isEmpty else { return 0 }
+        // Copies, so a line never belongs to two buffers; attaching re-homes its cells.
+        let lines = fitting.map { BufferLine(from: $0) }
+        _lines.prepend(lines[...])
+        let added = lines.count
+        yBase += added
+        yDisp += added
+        return added
+    }
+
     public func getBlankLine (attribute: Attribute, isWrapped: Bool = false) -> BufferLine
     {
         makeBlankLine(cols: cols, packedBlank: getPackedBlankCell(attribute: attribute),

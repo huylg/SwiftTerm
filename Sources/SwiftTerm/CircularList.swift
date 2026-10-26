@@ -372,6 +372,29 @@ internal final class CircularBufferLineList {
 #endif
     }
 
+    /// Inserts `items`, oldest first, ahead of the first line without moving the
+    /// lines already here: the start index steps back once per item. The caller
+    /// makes sure they fit under `maxLength`.
+    func prepend (_ items: ArraySlice<BufferLine>)
+    {
+        precondition(count + items.count <= maxLength, "prepend must fit under maxLength")
+        for value in items.reversed() {
+#if SWIFTTERM_EMBEDDED
+            if isLive { owner?.lineAttached(value) }
+#else
+            if isLive { owner.lineAttached(value) }
+#endif
+            startIndex = startIndex == 0 ? array.count - 1 : startIndex - 1
+            array [startIndex] = value
+            count = count + 1
+#if SWIFTTERM_EMBEDDED
+            if isLive { owner?.lineDidPush(hasImages: value.images != nil) }
+#else
+            if isLive { owner.lineDidPush(hasImages: value.images != nil) }
+#endif
+        }
+    }
+
     /// Recycles a row with state that already belongs to the owner's arena.
     func recycle(clearCell: PackedCell, isWrapped: Bool,
                  bidiState: BidiPresentationState)

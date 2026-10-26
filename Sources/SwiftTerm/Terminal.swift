@@ -5793,6 +5793,24 @@ open class Terminal {
         // TODO: audit any new variables, those in setup might be useful
     }
 
+    /// Adds the rows of `source` above the oldest scrollback row of the normal
+    /// buffer, for a restored snapshot whose history arrives newest page first.
+    ///
+    /// `source` is a terminal that has parsed one page of that history at this
+    /// terminal's width; its rows through the cursor's row are taken. The viewport
+    /// keeps showing the same rows. Rows past the scrollback limit are dropped,
+    /// oldest first. Returns how many rows were added.
+    ///
+    /// The caller holds the terminal lock, as for any other change to the buffer.
+    @discardableResult
+    public func prependHistory (from source: Terminal) -> Int
+    {
+        let page = source.normalBuffer
+        let end = min(page.lines.count, page.yBase + page.y + 1)
+        guard end > 0 else { return 0 }
+        return normalBuffer.prependHistory((0..<end).map { page.lines [$0] })
+    }
+
     /// Performs a terminal soft-reset, the equivalent of the DECSTR sequence
     /// For a full reset see `resetToInitialState`
     public func softReset ()

@@ -1941,6 +1941,31 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         selection?.setSelection(start: start, end: end)
     }
 
+    /// Adds the rows of `source`, a terminal of this one's width holding one page of
+    /// old history, above the oldest scrollback row. A restored snapshot sends its
+    /// history newest page first, so the pane can show and scroll before all of it
+    /// arrives. The text on screen stays where it is, mid-drag included. Returns
+    /// how many rows were added. Call it on the main thread.
+    @discardableResult
+    public func prependHistory(from source: Terminal) -> Int {
+        let added = withTerminal { terminal -> Int in
+            let added = terminal.prependHistory(from: source)
+            guard added > 0 else { return 0 }
+            // Selection positions count rows from the top, which just moved.
+            if selection?.active == true { selection?.active = false }
+            updateScrollerLocked()
+            terminal.refresh(startRow: 0, endRow: terminal.rows - 1)
+            return added
+        }
+        // While a finger or a coast owns the offset, `updateScrollerLocked` leaves it
+        // alone; move it by the rows added so the text under the finger stays put.
+        if added > 0, isTracking || (userScrolling && isDecelerating) {
+            setContentOffsetFromTerminal(CGPoint(x: contentOffset.x,
+                                                 y: contentOffset.y + CGFloat(added) * cellDimension.height))
+        }
+        return added
+    }
+
     /// Clears any active selection. Companion to `setSelectionRange`
     /// for callers that don't have a UIResponder hook into the menu
     /// system (where `selectNone` would otherwise come from).
@@ -2168,7 +2193,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         let maxContentOffset = maxContentOffsetY()
-        let offsetY = min(max(contentOffset.y, 0), maxContentOffset)
+        // A top inset lets the history rest above row 0, so its first rows can clear
+        // whatever the host lays over the view's top edge. Keep that part of the offset.
+        let offsetY = min(max(contentOffset.y, -adjustedContentInset.top), maxContentOffset)
 
         // A drag that lands within half a row of the bottom (or overscrolls past
         // it) re-engages auto-follow. A sub-pixel tolerance was too tight —
