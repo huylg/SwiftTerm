@@ -1941,6 +1941,31 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         selection?.setSelection(start: start, end: end)
     }
 
+    /// Adds the rows of `source`, a terminal of this one's width holding one page of
+    /// old history, above the oldest scrollback row. A restored snapshot sends its
+    /// history newest page first, so the pane can show and scroll before all of it
+    /// arrives. The text on screen stays where it is, mid-drag included. Returns
+    /// how many rows were added. Call it on the main thread.
+    @discardableResult
+    public func prependHistory(from source: Terminal) -> Int {
+        let added = withTerminal { terminal -> Int in
+            let added = terminal.prependHistory(from: source)
+            guard added > 0 else { return 0 }
+            // Selection positions count rows from the top, which just moved.
+            if selection?.active == true { selection?.active = false }
+            updateScrollerLocked()
+            terminal.refresh(startRow: 0, endRow: terminal.rows - 1)
+            return added
+        }
+        // While a finger or a coast owns the offset, `updateScrollerLocked` leaves it
+        // alone; move it by the rows added so the text under the finger stays put.
+        if added > 0, isTracking || (userScrolling && isDecelerating) {
+            setContentOffsetFromTerminal(CGPoint(x: contentOffset.x,
+                                                 y: contentOffset.y + CGFloat(added) * cellDimension.height))
+        }
+        return added
+    }
+
     /// Clears any active selection. Companion to `setSelectionRange`
     /// for callers that don't have a UIResponder hook into the menu
     /// system (where `selectNone` would otherwise come from).
