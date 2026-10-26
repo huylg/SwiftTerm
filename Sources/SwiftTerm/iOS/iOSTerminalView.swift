@@ -2193,7 +2193,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         let maxContentOffset = maxContentOffsetY()
-        let offsetY = min(max(contentOffset.y, 0), maxContentOffset)
+        // A top inset lets the history rest above row 0, so its first rows can clear
+        // whatever the host lays over the view's top edge. Keep that part of the offset.
+        let offsetY = min(max(contentOffset.y, -adjustedContentInset.top), maxContentOffset)
 
         // A drag that lands within half a row of the bottom (or overscrolls past
         // it) re-engages auto-follow. A sub-pixel tolerance was too tight —
