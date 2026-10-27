@@ -607,7 +607,7 @@ struct FrameViewState: Sendable {
 #else
         renderingScale = view.backingScaleFactor()
         fontSmoothing = true
-        cursorHasFocus = !view.caretViewTracksFocus || view.isFirstResponder
+        cursorHasFocus = !view.caretViewTracksFocus || view.hasFocus
 #endif
         let backingScale = view.backingScaleFactor()
         cellPixelWidth = cellPixelDimension(cellDimension.width, scale: backingScale)
