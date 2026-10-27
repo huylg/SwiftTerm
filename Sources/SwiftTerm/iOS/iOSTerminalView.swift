@@ -765,7 +765,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     @objc
-    public override func canPerformAction(
+    open override func canPerformAction(
         _ action: Selector,
         withSender sender: Any?
     ) -> Bool {
@@ -830,16 +830,45 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
     
+    /// A long press selects the word under the finger right away, as text views do.
+    /// The same finger then drags the selection out a word at a time, and lifting it
+    /// shows the menu with Copy. The handles adjust it by character after that.
     @objc func longPress (_ gestureRecognizer: UILongPressGestureRecognizer)
     {
-         if gestureRecognizer.state == .began {
-             let _ = self.becomeFirstResponder()
-             let tapLocation = gestureRecognizer.location(in: gestureRecognizer.view)
-             let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
-             
-             showContextMenu (forRegion: tapRegion,
-                              pos: calculateTapHit (gesture: gestureRecognizer).grid)
-          }
+        switch gestureRecognizer.state {
+        case .began:
+            let _ = self.becomeFirstResponder()
+            UIMenuController.shared.hideMenu()
+            let hit = calculateTapHit(gesture: gestureRecognizer).grid
+            withTerminal { terminal in
+                selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
+            }
+            enableSelectionPanGesture()
+            UISelectionFeedbackGenerator().selectionChanged()
+            frameDriver.markDirty()
+        case .changed:
+            stopSelectionTimer()
+            let hit = calculateTapHit(gesture: gestureRecognizer).grid
+            withTerminal { _ in selection.dragExtend(bufferPosition: hit) }
+            // Past the top or bottom edge, keep scrolling so the drag can reach more history.
+            let absoluteY = gestureRecognizer.location(in: self).y - contentOffset.y
+            if absoluteY < 0 || absoluteY > bounds.height {
+                startSelectionTimer {
+                    let newPlace = CGRect (x: 0, y: max (0, self.contentOffset.y+absoluteY), width: self.bounds.width, height: self.bounds.height)
+                    self.scrollRectToVisible(newPlace, animated: true)
+                }
+            }
+            requestDisplay()
+        case .ended:
+            stopSelectionTimer()
+            guard withTerminal({ _ in selection.active }) else { break }
+            withTerminal { _ in selection.selectionMode = .character }
+            showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: calculateTapHit(gesture: gestureRecognizer).grid)
+        case .cancelled, .failed:
+            stopSelectionTimer()
+        default:
+            break
+        }
     }
     
     /// This controls whether the backspace should send ^? or ^H, the default is ^?
@@ -1504,7 +1533,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     func setupGestures ()
     {
         let longPress = UILongPressGestureRecognizer (target: self, action: #selector(longPress(_:)))
-        longPress.minimumPressDuration = 0.7
+        longPress.minimumPressDuration = 0.5
         addGestureRecognizer(longPress)
         
         let singleTap = UITapGestureRecognizer (target: self, action: #selector(singleTap(_:)))
