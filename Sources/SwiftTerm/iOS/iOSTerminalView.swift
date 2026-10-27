@@ -275,6 +275,26 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
      */
     public var notifyUpdateChanges = false
 
+    /// Whether the terminal counts as focused, for focus reports (DECSET 1004) and
+    /// the caret. Defaults to being the first responder. A subclass can narrow it,
+    /// for example to while the keyboard is up, and call `updateTerminalFocus()`
+    /// when what it depends on changes.
+    open var hasFocus: Bool { isFirstResponder }
+
+    /// Tells the application and the caret about a change in `hasFocus`.
+    public func updateTerminalFocus() {
+        let focused = hasFocus
+        withTerminal { terminal in
+            if terminal.reportedFocusState != focused {
+                terminal.setTerminalFocus(focused)
+            }
+        }
+        caretView?.updateCursorStyle()
+#if canImport(MetalKit)
+        frameDriver.markDirty()
+#endif
+    }
+
     /// If true, the caret view will show different shapes depending on the focus
     /// otherwise, it will behave like it is focused
     public var caretViewTracksFocus: Bool {
@@ -3148,11 +3168,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     open override func becomeFirstResponder() -> Bool {
         let response = super.becomeFirstResponder()
         if response {
-            caretView?.updateCursorStyle()
-            withTerminal { $0.setTerminalFocus(true) }
-#if canImport(MetalKit)
-            frameDriver.markDirty()
-#endif
+            updateTerminalFocus()
         }
         return response
     }
@@ -3161,11 +3177,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let code = super.resignFirstResponder()
         
         if code {
-            withTerminal { $0.setTerminalFocus(false) }
-            caretView?.updateCursorStyle()
-#if canImport(MetalKit)
-            frameDriver.markDirty()
-#endif
+            updateTerminalFocus()
             stopAllKeyRepeats()
             reportedKittyPresses.removeAll()
             
