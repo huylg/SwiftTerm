@@ -9233,6 +9233,91 @@ open class Terminal {
 #endif
     }
 
+    /// The plain-text URLs, those that start with a scheme such as
+    /// `https://` rather than bare paths, on rows `rows` of the display
+    /// buffer. Keyed by absolute row, each value holds the columns the URLs
+    /// cover there. A URL wrapped in from a row outside `rows` still reports
+    /// its part inside them.
+    func implicitURLRanges(rows: Range<Int>) -> [Int: [Range<Int>]]
+    {
+#if SWIFTTERM_EMBEDDED
+        return [:]
+#else
+        let buffer = displayBuffer
+        let lower = max(0, rows.lowerBound)
+        let upper = min(buffer.lines.count, rows.upperBound)
+        guard lower < upper, let regex = Self.ghosttyImplicitLinkRegex else {
+            return [:]
+        }
+        let maximumGroupRows = 16
+        func joinsPrevious(_ row: Int) -> Bool {
+            row > 0 && (buffer.lines[row].isWrapped || canJoinImplicitRows(upper: row - 1, lower: row, in: buffer))
+        }
+
+        var result: [Int: [Range<Int>]] = [:]
+        var startRow = lower
+        while startRow > 0 && lower - startRow < maximumGroupRows && joinsPrevious(startRow) {
+            startRow -= 1
+        }
+        while startRow < upper {
+            var endRow = startRow
+            while endRow + 1 < buffer.lines.count && endRow - startRow + 1 < maximumGroupRows &&
+                    joinsPrevious(endRow + 1) {
+                endRow += 1
+            }
+            defer { startRow = endRow + 1 }
+
+            let (text, cells) = implicitGroupText(startRow: startRow, endRow: endRow, in: buffer)
+            guard text.contains(":") else {
+                continue
+            }
+            let searchRange = NSRange(text.startIndex..<text.endIndex, in: text)
+            for match in regex.matches(in: text, options: [], range: searchRange) {
+                guard match.range.length > 0,
+                      let textRange = Range(match.range, in: text),
+                      !suppressGhosttyLikeMatch(textRange, in: text)
+                else {
+                    continue
+                }
+                guard Self.isImplicitURL(String(text[textRange])) else {
+                    continue
+                }
+                let startOffset = text.distance(from: text.startIndex, to: textRange.lowerBound)
+                let endOffset = min(cells.count, text.distance(from: text.startIndex, to: textRange.upperBound))
+                guard startOffset < endOffset else {
+                    continue
+                }
+                var rowBounds: [Int: Range<Int>] = [:]
+                for cell in cells[startOffset..<endOffset] where cell.row >= lower && cell.row < upper {
+                    let cellRange = cell.col..<(cell.col + max(1, cell.width))
+                    if let bounds = rowBounds[cell.row] {
+                        rowBounds[cell.row] = min(bounds.lowerBound, cellRange.lowerBound)..<max(bounds.upperBound, cellRange.upperBound)
+                    } else {
+                        rowBounds[cell.row] = cellRange
+                    }
+                }
+                for (row, range) in rowBounds {
+                    result[row, default: []].append(range)
+                }
+            }
+        }
+        return result
+#endif
+    }
+
+    /// Whether `link`, found by implicit detection, is a URL with a scheme
+    /// rather than a bare path.
+    static func isImplicitURL(_ link: String) -> Bool
+    {
+        let lowered = link.lowercased()
+        return implicitURLSchemes.contains(where: { lowered.hasPrefix($0) })
+    }
+
+    private static let implicitURLSchemes = [
+        "http://", "https://", "mailto:", "ftp://", "file:", "ssh:", "git://", "tel:",
+        "magnet:", "ipfs://", "ipns://", "gemini://", "gopher://", "news:"
+    ]
+
     private func payloadCode(at position: Position, in buffer: Buffer) -> UInt16?
     {
         guard position.row >= 0 && position.row < buffer.lines.count else {
@@ -9393,10 +9478,35 @@ open class Terminal {
             endRow = heuristicEnd
         }
 
+        var targetIsInsideTrimmedContent = false
+        let (text, cells) = implicitGroupText(startRow: startRow, endRow: endRow, in: buffer) { row, startCol, lineLimit in
+            if row == targetRow && targetCol >= startCol && targetCol < lineLimit {
+                targetIsInsideTrimmedContent = true
+            }
+        }
+
+        guard !text.isEmpty, !cells.isEmpty, targetIsInsideTrimmedContent else {
+            return nil
+        }
+
+        return GhosttyImplicitLineMap(
+            text: text,
+            cells: cells,
+            targetRow: targetRow,
+            targetCol: targetCol
+        )
+    }
+
+    /// The text of rows `startRow...endRow` read as one line, with the cell
+    /// each character came from. Continuation rows drop their leading
+    /// indentation. `visitRow` sees each row's content span.
+    private func implicitGroupText(startRow: Int, endRow: Int, in buffer: Buffer,
+                                   visitRow: (_ row: Int, _ startCol: Int, _ lineLimit: Int) -> Void = { _, _, _ in })
+        -> (text: String, cells: [GhosttyImplicitCellRef])
+    {
         var text = ""
         var cells: [GhosttyImplicitCellRef] = []
         cells.reserveCapacity((endRow - startRow + 1) * cols)
-        var targetIsInsideTrimmedContent = false
 
         for row in startRow...endRow {
             let line = buffer.lines[row]
@@ -9413,9 +9523,7 @@ open class Terminal {
             guard startCol < lineLimit else {
                 continue
             }
-            if row == targetRow && targetCol >= startCol && targetCol < lineLimit {
-                targetIsInsideTrimmedContent = true
-            }
+            visitRow(row, startCol, lineLimit)
 
             for col in startCol..<lineLimit {
                 if col > 0 && line.packedCode(at: col) == 0 &&
@@ -9437,17 +9545,7 @@ open class Terminal {
                 )
             }
         }
-
-        guard !text.isEmpty, !cells.isEmpty, targetIsInsideTrimmedContent else {
-            return nil
-        }
-
-        return GhosttyImplicitLineMap(
-            text: text,
-            cells: cells,
-            targetRow: targetRow,
-            targetCol: targetCol
-        )
+        return (text, cells)
     }
 
     private func isImplicitContinuationRow(_ row: Int, startRow: Int, in buffer: Buffer) -> Bool

@@ -282,6 +282,42 @@ final class TerminalSnapshot {
         pendingBidi.removeAll(keepingCapacity: true)
     }
 
+    private struct URLRangesKey: Equatable {
+        let firstRow: Int
+        let cols: Int
+        let isAltBuffer: Bool
+        let lines: [ObjectIdentifier?]
+        let generations: [UInt64]
+    }
+
+    /// Finds the plain-text URLs on the rows just copied, or clears them when
+    /// `enabled` is false. A row whose URL columns change gets a new revision.
+    private func refreshURLRanges (terminal: Terminal, enabled: Bool) {
+        guard enabled else {
+            urlRangesKey = nil
+            if !urlRanges.isEmpty {
+                let previous = urlRanges
+                urlRanges = [:]
+                bumpRevisions(from: previous)
+            }
+            return
+        }
+        let key = URLRangesKey(firstRow: firstRow, cols: cols, isAltBuffer: isAltBuffer,
+                               lines: rows.map { $0.sourceIdentity },
+                               generations: rows.map { $0.sourceGeneration })
+        guard key != urlRangesKey else { return }
+        urlRangesKey = key
+        let previous = urlRanges
+        urlRanges = terminal.implicitURLRanges(rows: firstRow..<(firstRow + rows.count))
+        bumpRevisions(from: previous)
+    }
+
+    private func bumpRevisions (from previous: [Int: [Range<Int>]]) {
+        for (index, row) in rows.enumerated() where previous[firstRow + index] != urlRanges[firstRow + index] {
+            row.revision &+= 1
+        }
+    }
+
     private var previousStyle: SnapshotStyle?
     private var previousAnsiColors: [Color] = []
     private var previousBidiHostPolicy: BidiHostPolicy?
@@ -304,6 +340,13 @@ final class TerminalSnapshot {
     var maximumBidiParagraphRows = 1
     var cursor: SnapshotCursor?
     var style: SnapshotStyle = .empty
+    /// The plain-text URL columns of each visible absolute row, filled when
+    /// the view highlights URLs.
+    private(set) var urlRanges: [Int: [Range<Int>]] = [:]
+    /// The rows `urlRanges` was found on: the first absolute row and each
+    /// row's source line and generation. The scan is skipped while they
+    /// stay the same.
+    private var urlRangesKey: URLRangesKey?
     var kitty = SnapshotKitty()
     var ansiColors: [Color] = []
     var cgRegion: CGRect?
@@ -490,6 +533,8 @@ final class TerminalSnapshot {
                 destination.revision &+= 1
             }
         }
+
+        refreshURLRanges(terminal: terminal, enabled: viewState.highlightsURLs)
 
         kitty = SnapshotKitty(renderSnapshot: terminal.kittyGraphicsRenderSnapshot())
 

@@ -1017,6 +1017,10 @@ final class SnapshotTextBuilder {
     func shouldUnderlineLink(row: Int, column: Int, width: Int, cell: PackedCellView,
                              context: SnapshotRenderContext) -> Bool
     {
+        if let urls = context.urlRanges[row],
+           urls.contains(where: { $0.overlaps(column..<(column + width)) }) {
+            return true
+        }
         switch context.linkHighlightMode {
         case .always:
             return cell.hasPayload

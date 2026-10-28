@@ -542,6 +542,7 @@ struct FrameViewState: Sendable {
     let linkHighlightRange: [Terminal.LinkMatch.RowRange]?
     let linkHighlightMode: LinkHighlightMode
     let commandActive: Bool
+    let highlightsURLs: Bool
     let textBlinkVisible: Bool
     let notifyUpdateChanges: Bool
 
@@ -593,6 +594,7 @@ struct FrameViewState: Sendable {
         linkHighlightRange = view.linkHighlightRange
         linkHighlightMode = view.linkHighlightMode
         commandActive = view.commandActive
+        highlightsURLs = view.highlightsURLs
         textBlinkVisible = view.textBlinkVisible
         notifyUpdateChanges = view.notifyUpdateChanges
 
@@ -700,6 +702,9 @@ struct SnapshotRenderContext {
     let linkHighlightRange: [Terminal.LinkMatch.RowRange]?
     let linkHighlightMode: LinkHighlightMode
     let commandActive: Bool
+    /// The plain-text URL columns of each absolute row, drawn as links in
+    /// every mode. Empty unless the view's `highlightsURLs` is set.
+    let urlRanges: [Int: [Range<Int>]]
     let customBlockGlyphs: Bool
     let useBrightColors: Bool
     let minimumContrastRatio: CGFloat
@@ -716,7 +721,7 @@ struct SnapshotRenderContext {
     init (viewState: FrameViewState, snapshot: TerminalSnapshot) {
         self.init(viewState: viewState, style: snapshot.style,
                   nativeColors: snapshot.nativeColors(for: viewState.appearance),
-                  cols: snapshot.cols)
+                  cols: snapshot.cols, urlRanges: snapshot.urlRanges)
     }
 
     init (viewState: FrameViewState, style: SnapshotStyle, ansiColors: [Color],
@@ -734,11 +739,12 @@ struct SnapshotRenderContext {
                 caretTextColor: appearance.caretTextColor.nativeColor,
                 linkColor: appearance.linkColor?.nativeColor,
                 ansiColors: ansiColors.map(TTColor.make(color:))),
-            cols: cols)
+            cols: cols, urlRanges: [:])
     }
 
     private init (viewState: FrameViewState, style: SnapshotStyle,
-                  nativeColors: SnapshotNativeColors, cols: Int) {
+                  nativeColors: SnapshotNativeColors, cols: Int,
+                  urlRanges: [Int: [Range<Int>]]) {
         fonts = viewState.fonts
         cellDimension = viewState.cellDimension
         viewBounds = viewState.viewBounds
@@ -764,6 +770,7 @@ struct SnapshotRenderContext {
         linkHighlightRange = style.linkHighlightRange
         linkHighlightMode = style.linkHighlightMode
         commandActive = style.commandActive
+        self.urlRanges = urlRanges
         customBlockGlyphs = viewState.customBlockGlyphs
         useBrightColors = viewState.useBrightColors
         minimumContrastRatio = viewState.minimumContrastRatio
@@ -2987,13 +2994,14 @@ extension TerminalView {
     func linkForClickLocked(at position: Position, hasCommandModifier: Bool) -> (link: String, params: [String:String])?
     {
         terminal.terminalLock.preconditionLocked()
-        let mode: Terminal.LinkLookupMode = implicitLinkCouldBeVisible(hasCommandModifier: hasCommandModifier)
+        let mode: Terminal.LinkLookupMode = highlightsURLs || implicitLinkCouldBeVisible(hasCommandModifier: hasCommandModifier)
             ? .explicitAndImplicit
             : .explicitOnly
         guard let match = terminal.linkMatch(at: .buffer(position), mode: mode) else {
             return nil
         }
-        guard linkVisibleForClick(match: match, hasCommandModifier: hasCommandModifier) else {
+        let visibleURL = highlightsURLs && !match.isExplicit && Terminal.isImplicitURL(match.text)
+        guard visibleURL || linkVisibleForClick(match: match, hasCommandModifier: hasCommandModifier) else {
             return nil
         }
         if match.isExplicit,

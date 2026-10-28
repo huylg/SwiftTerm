@@ -493,6 +493,8 @@ struct RowCacheInputs {
     var selection: Range<Int>?
     /// The hovered link's columns, in the hover highlight modes.
     var link: Range<Int>?
+    /// The plain-text URLs' columns, when the view highlights them.
+    var urls: [Range<Int>]
     var images: [SnapshotImage]
     var hasBidiLayout: Bool
 
@@ -510,12 +512,13 @@ struct RowCacheInputs {
                 ? context.linkHighlightRange?.first(where: { $0.row == absoluteRow })?.range
                 : nil
         }
+        urls = context.urlRanges[absoluteRow] ?? []
         images = row.images
         hasBidiLayout = row.bidiLayout != nil
     }
 
     func matches(_ other: RowCacheInputs) -> Bool {
-        selection == other.selection && link == other.link &&
+        selection == other.selection && link == other.link && urls == other.urls &&
             hasBidiLayout == other.hasBidiLayout &&
             images.count == other.images.count &&
             zip(images, other.images).allSatisfy { $0.hasSameValue(as: $1) }
