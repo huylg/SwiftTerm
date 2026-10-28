@@ -9233,74 +9233,28 @@ open class Terminal {
 #endif
     }
 
-    /// A plain-text link found by ``implicitLinks(rows:urls:paths:)``.
-    struct ImplicitLink: Sendable {
-        let text: String
-        /// The columns it covers on each row, wrapped rows included.
-        let rowRanges: [LinkMatch.RowRange]
-    }
-
-    /// The plain-text links on rows `rows` of the display buffer: URLs, those
-    /// that start with a scheme such as `https://`, when `urls` is set, and
-    /// file paths when `paths` is set. Keyed by absolute row, each value holds
-    /// the columns the links cover there. A link wrapped in from a row outside
-    /// `rows` still reports its part inside them.
-    func implicitURLRanges(rows: Range<Int>, urls: Bool = true, paths: Bool = false) -> [Int: [Range<Int>]]
-    {
-        var result: [Int: [Range<Int>]] = [:]
-        for link in implicitLinks(rows: rows, urls: urls, paths: paths) {
-            for rowRange in link.rowRanges where rows.contains(rowRange.row) {
-                result[rowRange.row, default: []].append(rowRange.range)
-            }
-        }
-        return result
-    }
-
-    /// The plain-text link ``implicitURLRanges(rows:urls:paths:)`` reports at
-    /// `position`, if any.
-    func implicitLink(at position: Position, urls: Bool, paths: Bool) -> String?
-    {
-        implicitLinks(rows: position.row..<(position.row + 1), urls: urls, paths: paths).first { link in
-            link.rowRanges.contains { $0.row == position.row && $0.range.contains(position.col) }
-        }?.text
-    }
-
-    /// The plain-text links touching rows `rows`, read the way they are meant
-    /// to stay visible: unlike hover detection, a path ends at a space, and
-    /// rows are joined across a hard line end only where the seam is a URL, so
-    /// columns of `ls` output don't run together.
-    func implicitLinks(rows: Range<Int>, urls: Bool, paths: Bool) -> [ImplicitLink]
+    /// The plain-text URLs, those that start with a scheme such as
+    /// `https://` rather than bare paths, on rows `rows` of the display
+    /// buffer. Keyed by absolute row, each value holds the columns the URLs
+    /// cover there. A URL wrapped in from a row outside `rows` still reports
+    /// its part inside them.
+    func implicitURLRanges(rows: Range<Int>) -> [Int: [Range<Int>]]
     {
 #if SWIFTTERM_EMBEDDED
-        return []
+        return [:]
 #else
         let buffer = displayBuffer
         let lower = max(0, rows.lowerBound)
         let upper = min(buffer.lines.count, rows.upperBound)
-        guard lower < upper, urls || paths, let regex = Self.ghosttyImplicitLinkRegex else {
-            return []
+        guard lower < upper, let regex = Self.ghosttyImplicitLinkRegex else {
+            return [:]
         }
         let maximumGroupRows = 16
         func joinsPrevious(_ row: Int) -> Bool {
-            row > 0 && (buffer.lines[row].isWrapped ||
-                        (paths && fillsToEdge(upper: row - 1, lower: row)) ||
-                        canJoinImplicitRows(upper: row - 1, lower: row, in: buffer, urlsOnly: true))
-        }
-        // A row whose text runs into the last column and goes on at the next
-        // row's first one: a soft wrap that lost its mark, as rows restored
-        // from a saved screen do.
-        func fillsToEdge(upper: Int, lower: Int) -> Bool {
-            guard let upperInfo = linkRowEdgeInfo(row: upper, in: buffer),
-                  let lowerInfo = linkRowEdgeInfo(row: lower, in: buffer),
-                  upperInfo.lastCol == cols - 1, lowerInfo.firstCol == 0
-            else {
-                return false
-            }
-            return upperInfo.lastChar.unicodeScalars.allSatisfy { Self.ghosttyContinuationCharacters.contains($0) } &&
-                lowerInfo.firstChar.unicodeScalars.allSatisfy { Self.ghosttyContinuationCharacters.contains($0) }
+            row > 0 && (buffer.lines[row].isWrapped || canJoinImplicitRows(upper: row - 1, lower: row, in: buffer))
         }
 
-        var result: [ImplicitLink] = []
+        var result: [Int: [Range<Int>]] = [:]
         var startRow = lower
         while startRow > 0 && lower - startRow < maximumGroupRows && joinsPrevious(startRow) {
             startRow -= 1
@@ -9314,35 +9268,19 @@ open class Terminal {
             defer { startRow = endRow + 1 }
 
             let (text, cells) = implicitGroupText(startRow: startRow, endRow: endRow, in: buffer)
-            guard paths || text.contains(":") else {
+            guard text.contains(":") else {
                 continue
             }
-            let utf16Count = text.utf16.count
-            var location = 0
-            while location < utf16Count,
-                  let match = regex.firstMatch(in: text, options: [],
-                                               range: NSRange(location: location, length: utf16Count - location)) {
-                location = max(location + 1, match.range.location + match.range.length)
+            let searchRange = NSRange(text.startIndex..<text.endIndex, in: text)
+            for match in regex.matches(in: text, options: [], range: searchRange) {
                 guard match.range.length > 0,
-                      var textRange = Range(match.range, in: text),
+                      let textRange = Range(match.range, in: text),
                       !suppressGhosttyLikeMatch(textRange, in: text)
                 else {
                     continue
                 }
-                let isURL = Self.isImplicitURL(String(text[textRange]))
-                guard isURL ? urls : paths else {
+                guard Self.isImplicitURL(String(text[textRange])) else {
                     continue
-                }
-                if !isURL, let space = text[textRange].firstIndex(of: " ") {
-                    // Read the rest again: it may hold another path.
-                    textRange = textRange.lowerBound..<space
-                    location = NSRange(textRange, in: text).upperBound
-                    var end = textRange.upperBound
-                    while end > textRange.lowerBound, ":,.".contains(text[text.index(before: end)]) {
-                        end = text.index(before: end)
-                    }
-                    guard end > textRange.lowerBound else { continue }
-                    textRange = textRange.lowerBound..<end
                 }
                 let startOffset = text.distance(from: text.startIndex, to: textRange.lowerBound)
                 let endOffset = min(cells.count, text.distance(from: text.startIndex, to: textRange.upperBound))
@@ -9350,7 +9288,7 @@ open class Terminal {
                     continue
                 }
                 var rowBounds: [Int: Range<Int>] = [:]
-                for cell in cells[startOffset..<endOffset] {
+                for cell in cells[startOffset..<endOffset] where cell.row >= lower && cell.row < upper {
                     let cellRange = cell.col..<(cell.col + max(1, cell.width))
                     if let bounds = rowBounds[cell.row] {
                         rowBounds[cell.row] = min(bounds.lowerBound, cellRange.lowerBound)..<max(bounds.upperBound, cellRange.upperBound)
@@ -9358,9 +9296,9 @@ open class Terminal {
                         rowBounds[cell.row] = cellRange
                     }
                 }
-                result.append(ImplicitLink(
-                    text: String(text[textRange]),
-                    rowRanges: rowBounds.keys.sorted().map { .init(row: $0, range: rowBounds[$0]!) }))
+                for (row, range) in rowBounds {
+                    result[row, default: []].append(range)
+                }
             }
         }
         return result
@@ -9636,7 +9574,7 @@ open class Terminal {
         return (start == row && end == row) ? nil : (start, end)
     }
 
-    private func canJoinImplicitRows(upper: Int, lower: Int, in buffer: Buffer, urlsOnly: Bool = false) -> Bool
+    private func canJoinImplicitRows(upper: Int, lower: Int, in buffer: Buffer) -> Bool
     {
         guard let upperInfo = linkRowEdgeInfo(row: upper, in: buffer),
               let lowerInfo = linkRowEdgeInfo(row: lower, in: buffer)
@@ -9667,8 +9605,7 @@ open class Terminal {
             lower: lower,
             upperLastCol: upperInfo.lastCol,
             lowerFirstCol: lowerInfo.firstCol,
-            in: buffer,
-            urlsOnly: urlsOnly
+            in: buffer
         )
     }
 
@@ -9727,8 +9664,7 @@ open class Terminal {
         lower: Int,
         upperLastCol: Int,
         lowerFirstCol: Int,
-        in buffer: Buffer,
-        urlsOnly: Bool = false
+        in buffer: Buffer
     ) -> Bool
     {
         guard let regex = Self.ghosttyImplicitLinkRegex else {
@@ -9773,9 +9709,6 @@ open class Terminal {
                 continue
             }
             if suppressGhosttyLikeMatch(textRange, in: candidate) {
-                continue
-            }
-            if urlsOnly && !Self.isImplicitURL(String(candidate[textRange])) {
                 continue
             }
             return true

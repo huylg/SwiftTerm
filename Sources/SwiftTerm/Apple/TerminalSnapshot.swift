@@ -286,17 +286,14 @@ final class TerminalSnapshot {
         let firstRow: Int
         let cols: Int
         let isAltBuffer: Bool
-        let urls: Bool
-        let paths: Bool
         let lines: [ObjectIdentifier?]
         let generations: [UInt64]
     }
 
-    /// Finds the plain-text URLs and paths on the rows just copied, as the
-    /// view asks, or clears them when it asks for neither. A row whose link
-    /// columns change gets a new revision.
-    private func refreshURLRanges (terminal: Terminal, urls: Bool, paths: Bool) {
-        guard urls || paths else {
+    /// Finds the plain-text URLs on the rows just copied, or clears them when
+    /// `enabled` is false. A row whose URL columns change gets a new revision.
+    private func refreshURLRanges (terminal: Terminal, enabled: Bool) {
+        guard enabled else {
             urlRangesKey = nil
             if !urlRanges.isEmpty {
                 let previous = urlRanges
@@ -306,14 +303,12 @@ final class TerminalSnapshot {
             return
         }
         let key = URLRangesKey(firstRow: firstRow, cols: cols, isAltBuffer: isAltBuffer,
-                               urls: urls, paths: paths,
                                lines: rows.map { $0.sourceIdentity },
                                generations: rows.map { $0.sourceGeneration })
         guard key != urlRangesKey else { return }
         urlRangesKey = key
         let previous = urlRanges
-        urlRanges = terminal.implicitURLRanges(rows: firstRow..<(firstRow + rows.count),
-                                               urls: urls, paths: paths)
+        urlRanges = terminal.implicitURLRanges(rows: firstRow..<(firstRow + rows.count))
         bumpRevisions(from: previous)
     }
 
@@ -539,8 +534,7 @@ final class TerminalSnapshot {
             }
         }
 
-        refreshURLRanges(terminal: terminal, urls: viewState.highlightsURLs,
-                         paths: viewState.highlightsPaths)
+        refreshURLRanges(terminal: terminal, enabled: viewState.highlightsURLs)
 
         kitty = SnapshotKitty(renderSnapshot: terminal.kittyGraphicsRenderSnapshot())
 

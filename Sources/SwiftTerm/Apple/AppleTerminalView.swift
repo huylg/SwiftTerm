@@ -543,7 +543,6 @@ struct FrameViewState: Sendable {
     let linkHighlightMode: LinkHighlightMode
     let commandActive: Bool
     let highlightsURLs: Bool
-    let highlightsPaths: Bool
     let textBlinkVisible: Bool
     let notifyUpdateChanges: Bool
 
@@ -596,7 +595,6 @@ struct FrameViewState: Sendable {
         linkHighlightMode = view.linkHighlightMode
         commandActive = view.commandActive
         highlightsURLs = view.highlightsURLs
-        highlightsPaths = view.highlightsPaths
         textBlinkVisible = view.textBlinkVisible
         notifyUpdateChanges = view.notifyUpdateChanges
 
@@ -2996,19 +2994,14 @@ extension TerminalView {
     func linkForClickLocked(at position: Position, hasCommandModifier: Bool) -> (link: String, params: [String:String])?
     {
         terminal.terminalLock.preconditionLocked()
-        // Links shown all the time open exactly as boxed, read the same way.
-        if (highlightsURLs || highlightsPaths),
-           terminal.linkMatch(at: .buffer(position), mode: .explicitOnly) == nil,
-           let link = terminal.implicitLink(at: position, urls: highlightsURLs, paths: highlightsPaths) {
-            return (link, [:])
-        }
-        let mode: Terminal.LinkLookupMode = implicitLinkCouldBeVisible(hasCommandModifier: hasCommandModifier)
+        let mode: Terminal.LinkLookupMode = highlightsURLs || implicitLinkCouldBeVisible(hasCommandModifier: hasCommandModifier)
             ? .explicitAndImplicit
             : .explicitOnly
         guard let match = terminal.linkMatch(at: .buffer(position), mode: mode) else {
             return nil
         }
-        guard linkVisibleForClick(match: match, hasCommandModifier: hasCommandModifier) else {
+        let visibleURL = highlightsURLs && !match.isExplicit && Terminal.isImplicitURL(match.text)
+        guard visibleURL || linkVisibleForClick(match: match, hasCommandModifier: hasCommandModifier) else {
             return nil
         }
         if match.isExplicit,

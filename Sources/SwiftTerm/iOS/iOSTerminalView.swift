@@ -246,9 +246,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
 
-    /// The fill of the rounded box drawn behind each plain-text URL or path
-    /// that ``highlightsURLs`` or ``highlightsPaths`` picks out, like links
-    /// in a PDF viewer. `nil` (the
+    /// The fill of the rounded box drawn behind each plain-text URL while
+    /// ``highlightsURLs`` is on, like links in a PDF viewer. `nil` (the
     /// default) draws no box.
     public var urlBoxColor: UIColor? {
         didSet { updateURLBoxes(lastURLRanges) }
@@ -270,7 +269,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// in content coordinates, so the boxes scroll with the text.
     func updateURLBoxes(_ ranges: [Int: [Range<Int>]]) {
         lastURLRanges = ranges
-        guard let color = urlBoxColor, highlightsURLs || highlightsPaths else {
+        guard let color = urlBoxColor, highlightsURLs else {
             urlBoxContainer.isHidden = true
             return
         }
@@ -325,17 +324,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// opens the nearest link within this distance. Defaults to 0: only the
     /// cell under the tap.
     public var linkTapRadius: CGFloat = 0
-
-    /// When true, plain-text file and folder paths are drawn and activated
-    /// like ``highlightsURLs`` draws URLs. A tap hands the path, as written,
-    /// to `requestOpenLink`; resolving it is up to the delegate. Defaults to
-    /// `false`.
-    public var highlightsPaths = false {
-        didSet {
-            withTerminal { $0.updateFullScreen() }
-            frameDriver.markDirty()
-        }
-    }
 
     /// The color used to draw link text and its underline, or `nil` (the
     /// default) to draw each link in its cell's own foreground color.
