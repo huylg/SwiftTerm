@@ -659,6 +659,7 @@ final class TerminalRenderOwner: Sendable {
         guard update != nil else { return nil }
         session.snapshot.completePendingBidi()
         update?.cursor = session.snapshot.cursor
+        update?.urlRanges = session.snapshot.urlRanges
         let blinkRows = Self.blinkRows(in: session.snapshot)
         mailbox.publishBlinkRows(blinkRows)
         update?.blinkRows = blinkRows

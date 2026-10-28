@@ -246,6 +246,73 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
 
+    /// The fill of the rounded box drawn behind each plain-text URL while
+    /// ``highlightsURLs`` is on, like links in a PDF viewer. `nil` (the
+    /// default) draws no box.
+    public var urlBoxColor: UIColor? {
+        didSet { updateURLBoxes(lastURLRanges) }
+    }
+
+    /// How far each URL box reaches past its text, in points.
+    public var urlBoxPadding = CGSize(width: 3, height: 1)
+
+    private lazy var urlBoxContainer: UIView = {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.clipsToBounds = false
+        return view
+    }()
+    private var urlBoxLayers: [CALayer] = []
+    private var lastURLRanges: [Int: [Range<Int>]] = [:]
+
+    /// Places one box per row a URL covers. Rows sit at `row * cell height`
+    /// in content coordinates, so the boxes scroll with the text.
+    func updateURLBoxes(_ ranges: [Int: [Range<Int>]]) {
+        lastURLRanges = ranges
+        guard let color = urlBoxColor, highlightsURLs else {
+            urlBoxContainer.isHidden = true
+            return
+        }
+        if urlBoxContainer.superview !== self {
+            if let metalView {
+                insertSubview(urlBoxContainer, aboveSubview: metalView)
+            } else {
+                addSubview(urlBoxContainer)
+            }
+        }
+        urlBoxContainer.isHidden = false
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+
+        let cell = cellDimension
+        let pad = urlBoxPadding
+        var index = 0
+        for (row, columns) in ranges {
+            for range in columns {
+                let box: CALayer
+                if index < urlBoxLayers.count {
+                    box = urlBoxLayers[index]
+                } else {
+                    box = CALayer()
+                    urlBoxLayers.append(box)
+                    urlBoxContainer.layer.addSublayer(box)
+                }
+                box.isHidden = false
+                box.backgroundColor = color.cgColor
+                box.cornerRadius = min(4, cell.height / 4)
+                box.frame = CGRect(x: CGFloat(range.lowerBound) * cell.width - pad.width,
+                                   y: CGFloat(row) * cell.height - pad.height,
+                                   width: CGFloat(range.count) * cell.width + pad.width * 2,
+                                   height: cell.height + pad.height * 2)
+                index += 1
+            }
+        }
+        for box in urlBoxLayers[index...] {
+            box.isHidden = true
+        }
+    }
+
     /// How far from a tap, in points, a link still counts as tapped. A cell
     /// is smaller than a fingertip, so a tap that lands just beside a link
     /// opens the nearest link within this distance. Defaults to 0: only the

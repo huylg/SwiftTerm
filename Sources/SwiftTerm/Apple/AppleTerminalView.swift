@@ -3933,6 +3933,8 @@ extension TerminalView {
         /// Snapshot row count at prepare time, so placing the caret
         /// needs no second look at the snapshot.
         var cursorRowCount: Int
+        /// The snapshot's plain-text URL columns, by absolute row.
+        var urlRanges: [Int: [Range<Int>]] = [:]
 
         init (region: CGRect?, rangeChanged: (start: Int, end: Int)?,
               notifyAccessibility: Bool, needsMetalDisplay: Bool,
@@ -3992,6 +3994,9 @@ extension TerminalView {
         guard let prepared = prepareFrame(viewState: viewState) else { return }
         applyFrameSideEffects(prepared.mainEffects)
         updateCursorPosition(from: prepared.cursor, rowCount: prepared.cursorRowCount)
+#if os(iOS) || os(visionOS)
+        updateURLBoxes(prepared.urlRanges)
+#endif
         submitFrameDraw(prepared)
     }
 
