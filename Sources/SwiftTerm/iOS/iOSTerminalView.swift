@@ -246,6 +246,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
 
+    /// How far from a tap, in points, a link still counts as tapped. A cell
+    /// is smaller than a fingertip, so a tap that lands just beside a link
+    /// opens the nearest link within this distance. Defaults to 0: only the
+    /// cell under the tap.
+    public var linkTapRadius: CGFloat = 0
+
     /// The color used to draw link text and its underline, or `nil` (the
     /// default) to draw each link in its cell's own foreground color.
     ///
@@ -1053,6 +1059,32 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         return result
     }
 
+    /// The link under `point`, or else the nearest one within
+    /// ``linkTapRadius``.
+    private func linkNearTap(at point: CGPoint) -> (link: String, params: [String: String])? {
+        let step: CGFloat = 4
+        let reach = Int((max(0, linkTapRadius) / step).rounded(.down))
+        var offsets: [CGPoint] = []
+        for dy in -reach...reach {
+            for dx in -reach...reach where dx * dx + dy * dy <= reach * reach {
+                offsets.append(CGPoint(x: CGFloat(dx) * step, y: CGFloat(dy) * step))
+            }
+        }
+        offsets.sort { $0.x * $0.x + $0.y * $0.y < $1.x * $1.x + $1.y * $1.y }
+        var tried: [Position] = []
+        for offset in offsets {
+            let sample = CGPoint(x: point.x + offset.x, y: point.y + offset.y)
+            guard offset == .zero || bounds.contains(sample) else { continue }
+            let hit = calculateTapHit(point: sample).grid
+            guard !tried.contains(hit) else { continue }
+            tried.append(hit)
+            if let result = linkForClick(at: hit, hasCommandModifier: commandActive) {
+                return result
+            }
+        }
+        return nil
+    }
+
     private func tapAction(tapCount: Int,
                            gestureRecognizer: UIGestureRecognizer) -> TerminalTapAction {
         withTerminal { terminal in
@@ -1071,7 +1103,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
               gestureRecognizer.state == .ended else { return }
 
         let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
-        if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive) {
+        if let result = linkNearTap(at: gestureRecognizer.location(in: self)) {
             terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
             return
         }
