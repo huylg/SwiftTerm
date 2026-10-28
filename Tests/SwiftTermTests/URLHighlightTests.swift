@@ -11,14 +11,14 @@ final class URLHighlightTests: TerminalDelegate {
     func send(source: Terminal, data: ArraySlice<UInt8>) {
     }
 
-    @Test func findsURLsButNotPaths() {
+    @Test func findsWebURLsOnly() {
         let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 60, rows: 3))
         terminal.feed(text: "see https://example.com/a and /usr/local/bin\r\n")
         terminal.feed(text: "mail mailto:me@example.com\r\n")
 
         let ranges = terminal.implicitURLRanges(rows: 0..<3)
         #expect(ranges[0] == [4..<25])
-        #expect(ranges[1] == [5..<26])
+        #expect(ranges[1] == nil)
         #expect(ranges[2] == nil)
     }
 
@@ -39,6 +39,7 @@ final class URLHighlightTests: TerminalDelegate {
 
     @Test func recognizesURLSchemes() {
         #expect(Terminal.isImplicitURL("HTTPS://example.com"))
+        #expect(!Terminal.isImplicitURL("mailto:me@example.com"))
         #expect(!Terminal.isImplicitURL("/usr/local/bin"))
         #expect(!Terminal.isImplicitURL("src/main.swift:12"))
     }

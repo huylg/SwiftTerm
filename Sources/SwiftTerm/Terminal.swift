@@ -9233,8 +9233,8 @@ open class Terminal {
 #endif
     }
 
-    /// The plain-text URLs, those that start with a scheme such as
-    /// `https://` rather than bare paths, on rows `rows` of the display
+    /// The plain-text web URLs, those that start with `http://` or
+    /// `https://`, on rows `rows` of the display
     /// buffer. Keyed by absolute row, each value holds the columns the URLs
     /// cover there. A URL wrapped in from a row outside `rows` still reports
     /// its part inside them.
@@ -9305,18 +9305,15 @@ open class Terminal {
 #endif
     }
 
-    /// Whether `link`, found by implicit detection, is a URL with a scheme
-    /// rather than a bare path.
+    /// Whether `link`, found by implicit detection, is a web URL rather than
+    /// a path or another kind of link.
     static func isImplicitURL(_ link: String) -> Bool
     {
         let lowered = link.lowercased()
         return implicitURLSchemes.contains(where: { lowered.hasPrefix($0) })
     }
 
-    private static let implicitURLSchemes = [
-        "http://", "https://", "mailto:", "ftp://", "file:", "ssh:", "git://", "tel:",
-        "magnet:", "ipfs://", "ipns://", "gemini://", "gopher://", "news:"
-    ]
+    private static let implicitURLSchemes = ["http://", "https://"]
 
     private func payloadCode(at position: Position, in buffer: Buffer) -> UInt16?
     {

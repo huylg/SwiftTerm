@@ -63,6 +63,38 @@ struct LinkColorTests {
 
     /// With no link color, a link keeps its cell's foreground color and is
     /// underlined in it.
+    @Test func plainRowsColorLinksToo() throws {
+        let view = makeView()
+        view.linkColor = .systemBlue
+        let snapshot = TerminalSnapshot()
+        view.withTerminal { terminal in
+            _ = snapshot.refresh(terminal: terminal, viewState: FrameViewState(view: view),
+                                 selection: SnapshotSelectionState(selection: view.selection))
+        }
+        let row = try #require(snapshot.rows.first)
+        let context = SnapshotRenderContext(viewState: FrameViewState(view: view), snapshot: snapshot)
+        let plain = try #require(view.textBuilder.plainRow(row: row, absoluteRow: snapshot.firstRow,
+                                                           context: context))
+        // Column 1 holds the link "L".
+        let run = try #require(plain.runs.first { $0.start <= 1 && 1 < $0.end })
+        guard case .color(let color) = run.style.foreground else {
+            Issue.record("the link run keeps the cell's own color")
+            return
+        }
+        #expect(components(color) == components(NSColor.systemBlue))
+    }
+
+    @Test func linksCanDropTheUnderline() throws {
+        let view = makeView()
+        #expect(try attributes(of: "L", in: view)[.underlineStyle] != nil)
+
+        view.underlinesLinks = false
+        view.linkColor = .systemBlue
+        let link = try attributes(of: "L", in: view)
+        #expect(link[.underlineStyle] == nil)
+        #expect(components(link[.foregroundColor]) == components(NSColor.systemBlue))
+    }
+
     @Test func nilLinkColorKeepsTheCellForeground() throws {
         let view = makeView()
         #expect(view.linkColor == nil)

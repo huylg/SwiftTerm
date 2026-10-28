@@ -543,6 +543,7 @@ struct FrameViewState: Sendable {
     let linkHighlightMode: LinkHighlightMode
     let commandActive: Bool
     let highlightsURLs: Bool
+    let underlinesLinks: Bool
     let textBlinkVisible: Bool
     let notifyUpdateChanges: Bool
 
@@ -595,6 +596,7 @@ struct FrameViewState: Sendable {
         linkHighlightMode = view.linkHighlightMode
         commandActive = view.commandActive
         highlightsURLs = view.highlightsURLs
+        underlinesLinks = view.underlinesLinks
         textBlinkVisible = view.textBlinkVisible
         notifyUpdateChanges = view.notifyUpdateChanges
 
@@ -705,6 +707,8 @@ struct SnapshotRenderContext {
     /// The plain-text URL columns of each absolute row, drawn as links in
     /// every mode. Empty unless the view's `highlightsURLs` is set.
     let urlRanges: [Int: [Range<Int>]]
+    /// Whether link cells get a dashed underline.
+    let underlinesLinks: Bool
     let customBlockGlyphs: Bool
     let useBrightColors: Bool
     let minimumContrastRatio: CGFloat
@@ -771,6 +775,7 @@ struct SnapshotRenderContext {
         linkHighlightMode = style.linkHighlightMode
         commandActive = style.commandActive
         self.urlRanges = urlRanges
+        underlinesLinks = viewState.underlinesLinks
         customBlockGlyphs = viewState.customBlockGlyphs
         useBrightColors = viewState.useBrightColors
         minimumContrastRatio = viewState.minimumContrastRatio
@@ -791,6 +796,7 @@ struct SnapshotRenderContext {
         identityHasher.combine(caretColor.hash)
         identityHasher.combine(caretTextColor.hash)
         identityHasher.combine(linkColor?.hash)
+        identityHasher.combine(underlinesLinks)
         for color in self.ansiColors {
             identityHasher.combine(color.hash)
         }

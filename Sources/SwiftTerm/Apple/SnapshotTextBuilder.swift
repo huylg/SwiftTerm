@@ -374,7 +374,7 @@ final class SnapshotTextBuilder {
             result[.strikethroughColor] = foregroundColor
             result[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
         }
-        if withUrl {
+        if withUrl && context.underlinesLinks {
             result[.underlineStyle] = NSUnderlineStyle.single.rawValue
             result[.underlineColor] = foregroundColor
             result[SwiftTermUnderlineStyleKey] = Int(UnderlineStyle.dashed.rawValue)
@@ -843,6 +843,11 @@ final class SnapshotTextBuilder {
             foregroundColor = .color(dimmedColor(foregroundColor, towards: backgroundColor,
                                                  context: context))
         }
+        if withUrl, let linkColor = context.linkColor {
+            // As in `buildAttributes`: the host's link color replaces the
+            // cell's own for the text and the lines drawn with it.
+            foregroundColor = .color(linkColor)
+        }
         let shapeColor = foregroundColor
         foregroundColor = contrastedColor(foregroundColor, against: backgroundColor, context: context)
         var style = PlainRunStyle(fontIndex: fontIndex,
@@ -862,7 +867,7 @@ final class SnapshotTextBuilder {
         if flags.contains(.crossedOut) {
             style.strikethrough = foregroundColor
         }
-        if withUrl {
+        if withUrl && context.underlinesLinks {
             style.underline = PlainUnderline(color: foregroundColor,
                                              nsStyle: NSUnderlineStyle.single.rawValue,
                                              style: .dashed)
