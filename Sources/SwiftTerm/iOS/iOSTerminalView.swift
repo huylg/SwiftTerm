@@ -262,6 +262,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         return view
     }()
     private var urlBoxLayers: [CALayer] = []
+    private var linkTapDelegate: LinkTapGestureDelegate?
+
+    /// The tap that opens links. It only begins near a link, and the view's
+    /// other taps wait for it to fail. A host with its own tap recognizers
+    /// should make them wait for it too, so a link tap does nothing else.
+    public private(set) var linkTapGestureRecognizer: UITapGestureRecognizer?
     private var lastURLRanges: [Int: [Range<Int>]] = [:]
 
     /// Places one box per row a URL covers. Rows sit at `row * cell height`
@@ -1184,10 +1190,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
               gestureRecognizer.state == .ended else { return }
 
         let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
-        if let result = linkNearTap(at: gestureRecognizer.location(in: self)) {
-            terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
-            return
-        }
 
         // A tracking application owns the click even while the software keyboard is dismissed.
         // Spending the first tap only on focus makes TUI controls unreachable from a phone.
@@ -1673,6 +1675,34 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         singleTap.require(toFail: doubleTap)
         doubleTap.require(toFail: tripleTap)
+
+        // A tap on a link opens it as soon as the finger lifts. The other
+        // gestures wait for this one, which fails at once away from links,
+        // so a link never waits out a double tap or becomes a selection.
+        let linkTap = UITapGestureRecognizer(target: self, action: #selector(linkTapped(_:)))
+        let delegate = LinkTapGestureDelegate(terminalView: self)
+        linkTapDelegate = delegate
+        linkTap.delegate = delegate
+        addGestureRecognizer(linkTap)
+        linkTapGestureRecognizer = linkTap
+        for other in [singleTap, doubleTap, tripleTap] {
+            other.require(toFail: linkTap)
+        }
+        // A press held long enough selects instead; a short one has already
+        // failed it by the time the finger lifts, so this adds no delay.
+        linkTap.require(toFail: longPress)
+    }
+
+    @objc func linkTapped(_ gestureRecognizer: UITapGestureRecognizer)
+    {
+        guard gestureRecognizer.state == .ended,
+              let result = linkNearTap(at: gestureRecognizer.location(in: self)) else { return }
+        terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
+    }
+
+    /// Whether a touch at `point` would open a link.
+    func hasLinkNearTap(at point: CGPoint) -> Bool {
+        linkNearTap(at: point) != nil
     }
 
     func setupLinkReportingInteractions ()
@@ -4092,6 +4122,25 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 }
 
 @MainActor
+private final class LinkTapGestureDelegate: NSObject, UIGestureRecognizerDelegate {
+    private weak var terminalView: TerminalView?
+
+    init(terminalView: TerminalView) {
+        self.terminalView = terminalView
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let terminalView else { return false }
+        return terminalView.hasLinkNearTap(at: gestureRecognizer.location(in: terminalView))
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        // Never block scrolling: a drag that starts on a link still scrolls.
+        other is UIPanGestureRecognizer
+    }
+}
+
 private final class PointerScrollGestureDelegate: NSObject, UIGestureRecognizerDelegate {
     private weak var terminalView: TerminalView?
 
