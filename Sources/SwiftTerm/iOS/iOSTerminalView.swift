@@ -281,6 +281,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             }
         }
         urlBoxContainer.isHidden = false
+        // Opaque boxes in a translucent container, so where padded boxes of
+        // neighboring rows overlap the tint stays even.
+        var alpha: CGFloat = 1
+        color.getRed(nil, green: nil, blue: nil, alpha: &alpha)
+        urlBoxContainer.alpha = alpha
+        let fill = color.withAlphaComponent(1).cgColor
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
@@ -299,8 +305,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     urlBoxContainer.layer.addSublayer(box)
                 }
                 box.isHidden = false
-                box.backgroundColor = color.cgColor
-                box.cornerRadius = min(4, cell.height / 4)
+                box.backgroundColor = fill
+                box.cornerRadius = min(6, cell.height / 3)
                 box.frame = CGRect(x: CGFloat(range.lowerBound) * cell.width - pad.width,
                                    y: CGFloat(row) * cell.height - pad.height,
                                    width: CGFloat(range.count) * cell.width + pad.width * 2,
