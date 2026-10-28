@@ -9233,28 +9233,86 @@ open class Terminal {
 #endif
     }
 
+    /// A plain-text web URL found by ``implicitURLs(rows:)``.
+    struct ImplicitURL: Sendable {
+        let text: String
+        /// The columns it covers on each row, wrapped rows included.
+        let rowRanges: [LinkMatch.RowRange]
+    }
+
     /// The plain-text web URLs, those that start with `http://` or
-    /// `https://`, on rows `rows` of the display
-    /// buffer. Keyed by absolute row, each value holds the columns the URLs
-    /// cover there. A URL wrapped in from a row outside `rows` still reports
-    /// its part inside them.
+    /// `https://`, on rows `rows` of the display buffer. Keyed by absolute
+    /// row, each value holds the columns the URLs cover there. A URL wrapped
+    /// in from a row outside `rows` still reports its part inside them.
     func implicitURLRanges(rows: Range<Int>) -> [Int: [Range<Int>]]
     {
+        var result: [Int: [Range<Int>]] = [:]
+        for url in implicitURLs(rows: rows) {
+            for rowRange in url.rowRanges where rows.contains(rowRange.row) {
+                result[rowRange.row, default: []].append(rowRange.range)
+            }
+        }
+        return result
+    }
+
+    /// The URL ``implicitURLRanges(rows:)`` reports at `position`, if any.
+    func implicitURL(at position: Position) -> String?
+    {
+        implicitURLs(rows: position.row..<(position.row + 1)).first { url in
+            url.rowRanges.contains { $0.row == position.row && $0.range.contains(position.col) }
+        }?.text
+    }
+
+    /// The web URLs touching rows `rows`, read the way they stay visible.
+    /// Unlike hover detection, rows join across a hard line end only where
+    /// the upper one runs to the last column and the seam is a URL: a line
+    /// that merely ends near the edge, followed by `- item`, stays apart.
+    func implicitURLs(rows: Range<Int>) -> [ImplicitURL]
+    {
 #if SWIFTTERM_EMBEDDED
-        return [:]
+        return []
 #else
         let buffer = displayBuffer
         let lower = max(0, rows.lowerBound)
         let upper = min(buffer.lines.count, rows.upperBound)
         guard lower < upper, let regex = Self.ghosttyImplicitLinkRegex else {
-            return [:]
+            return []
         }
         let maximumGroupRows = 16
         func joinsPrevious(_ row: Int) -> Bool {
-            row > 0 && (buffer.lines[row].isWrapped || canJoinImplicitRows(upper: row - 1, lower: row, in: buffer))
+            guard row > 0 else { return false }
+            if buffer.lines[row].isWrapped { return true }
+            // A program that wraps a long URL itself fills the row, give or
+            // take a column it keeps free.
+            guard let edge = linkRowEdgeInfo(row: row - 1, in: buffer), edge.lastCol >= cols - 2 else {
+                return false
+            }
+            return !startsWithListMarker(row) &&
+                canJoinImplicitRows(upper: row - 1, lower: row, in: buffer, urlsOnly: true)
+        }
+        // `- item`, `* item`, `• item`, `1. item`: a new line of a list, even
+        // when the row above it ends near the edge.
+        func startsWithListMarker(_ row: Int) -> Bool {
+            let line = buffer.lines[row]
+            let limit = min(cols, line.count)
+            func isBlank(_ col: Int) -> Bool {
+                let character = line.packedCharacter(at: col)
+                return character == " " || character == "\u{0}"
+            }
+            var col = 0
+            while col < limit, isBlank(col) { col += 1 }
+            var marker = ""
+            while col < limit, marker.count < 4 {
+                if isBlank(col) { break }
+                marker.append(line.packedCharacter(at: col))
+                col += 1
+            }
+            guard col < limit, isBlank(col) else { return false }
+            return ["-", "*", "+", "•"].contains(marker) ||
+                (marker.count >= 2 && marker.dropLast().allSatisfy(\.isNumber) && [".", ")"].contains(marker.last!))
         }
 
-        var result: [Int: [Range<Int>]] = [:]
+        var result: [ImplicitURL] = []
         var startRow = lower
         while startRow > 0 && lower - startRow < maximumGroupRows && joinsPrevious(startRow) {
             startRow -= 1
@@ -9267,7 +9325,8 @@ open class Terminal {
             }
             defer { startRow = endRow + 1 }
 
-            let (text, cells) = implicitGroupText(startRow: startRow, endRow: endRow, in: buffer)
+            let (text, cells) = implicitGroupText(startRow: startRow, endRow: endRow, in: buffer,
+                                                  joinsPrevious: joinsPrevious)
             guard text.contains(":") else {
                 continue
             }
@@ -9275,11 +9334,9 @@ open class Terminal {
             for match in regex.matches(in: text, options: [], range: searchRange) {
                 guard match.range.length > 0,
                       let textRange = Range(match.range, in: text),
-                      !suppressGhosttyLikeMatch(textRange, in: text)
+                      !suppressGhosttyLikeMatch(textRange, in: text),
+                      Self.isImplicitURL(String(text[textRange]))
                 else {
-                    continue
-                }
-                guard Self.isImplicitURL(String(text[textRange])) else {
                     continue
                 }
                 let startOffset = text.distance(from: text.startIndex, to: textRange.lowerBound)
@@ -9288,7 +9345,7 @@ open class Terminal {
                     continue
                 }
                 var rowBounds: [Int: Range<Int>] = [:]
-                for cell in cells[startOffset..<endOffset] where cell.row >= lower && cell.row < upper {
+                for cell in cells[startOffset..<endOffset] {
                     let cellRange = cell.col..<(cell.col + max(1, cell.width))
                     if let bounds = rowBounds[cell.row] {
                         rowBounds[cell.row] = min(bounds.lowerBound, cellRange.lowerBound)..<max(bounds.upperBound, cellRange.upperBound)
@@ -9296,9 +9353,9 @@ open class Terminal {
                         rowBounds[cell.row] = cellRange
                     }
                 }
-                for (row, range) in rowBounds {
-                    result[row, default: []].append(range)
-                }
+                result.append(ImplicitURL(
+                    text: String(text[textRange]),
+                    rowRanges: rowBounds.keys.sorted().map { .init(row: $0, range: rowBounds[$0]!) }))
             }
         }
         return result
@@ -9476,11 +9533,11 @@ open class Terminal {
         }
 
         var targetIsInsideTrimmedContent = false
-        let (text, cells) = implicitGroupText(startRow: startRow, endRow: endRow, in: buffer) { row, startCol, lineLimit in
+        let (text, cells) = implicitGroupText(startRow: startRow, endRow: endRow, in: buffer, visitRow: { row, startCol, lineLimit in
             if row == targetRow && targetCol >= startCol && targetCol < lineLimit {
                 targetIsInsideTrimmedContent = true
             }
-        }
+        })
 
         guard !text.isEmpty, !cells.isEmpty, targetIsInsideTrimmedContent else {
             return nil
@@ -9498,6 +9555,7 @@ open class Terminal {
     /// each character came from. Continuation rows drop their leading
     /// indentation. `visitRow` sees each row's content span.
     private func implicitGroupText(startRow: Int, endRow: Int, in buffer: Buffer,
+                                   joinsPrevious: ((Int) -> Bool)? = nil,
                                    visitRow: (_ row: Int, _ startCol: Int, _ lineLimit: Int) -> Void = { _, _, _ in })
         -> (text: String, cells: [GhosttyImplicitCellRef])
     {
@@ -9515,7 +9573,8 @@ open class Terminal {
             if lineLimit <= 0 {
                 continue
             }
-            let isContinuationRow = isImplicitContinuationRow(row, startRow: startRow, in: buffer)
+            let isContinuationRow = joinsPrevious.map { row > startRow && $0(row) }
+                ?? isImplicitContinuationRow(row, startRow: startRow, in: buffer)
             let startCol = isContinuationRow ? firstNonWhitespaceColumn(in: line, lineLimit: lineLimit) : 0
             guard startCol < lineLimit else {
                 continue
@@ -9571,7 +9630,7 @@ open class Terminal {
         return (start == row && end == row) ? nil : (start, end)
     }
 
-    private func canJoinImplicitRows(upper: Int, lower: Int, in buffer: Buffer) -> Bool
+    private func canJoinImplicitRows(upper: Int, lower: Int, in buffer: Buffer, urlsOnly: Bool = false) -> Bool
     {
         guard let upperInfo = linkRowEdgeInfo(row: upper, in: buffer),
               let lowerInfo = linkRowEdgeInfo(row: lower, in: buffer)
@@ -9602,7 +9661,8 @@ open class Terminal {
             lower: lower,
             upperLastCol: upperInfo.lastCol,
             lowerFirstCol: lowerInfo.firstCol,
-            in: buffer
+            in: buffer,
+            urlsOnly: urlsOnly
         )
     }
 
@@ -9661,7 +9721,8 @@ open class Terminal {
         lower: Int,
         upperLastCol: Int,
         lowerFirstCol: Int,
-        in buffer: Buffer
+        in buffer: Buffer,
+        urlsOnly: Bool = false
     ) -> Bool
     {
         guard let regex = Self.ghosttyImplicitLinkRegex else {
@@ -9706,6 +9767,9 @@ open class Terminal {
                 continue
             }
             if suppressGhosttyLikeMatch(textRange, in: candidate) {
+                continue
+            }
+            if urlsOnly && !Self.isImplicitURL(String(candidate[textRange])) {
                 continue
             }
             return true

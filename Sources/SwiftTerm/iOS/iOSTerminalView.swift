@@ -249,7 +249,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// ``highlightsURLs`` is on, like links in a PDF viewer. `nil` (the
     /// default) draws no box.
     public var urlBoxColor: UIColor? {
-        didSet { updateURLBoxes(lastURLRanges) }
+        didSet { updateURLBoxes(lastURLRanges, drawnOffsetY: lastDrawnOffsetY) }
     }
 
     /// How far each URL box reaches past its text, in points.
@@ -269,11 +269,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// should make them wait for it too, so a link tap does nothing else.
     public private(set) var linkTapGestureRecognizer: UITapGestureRecognizer?
     private var lastURLRanges: [Int: [Range<Int>]] = [:]
+    private var lastDrawnOffsetY: CGFloat = 0
 
-    /// Places one box per row a URL covers. Rows sit at `row * cell height`
-    /// in content coordinates, so the boxes scroll with the text.
-    func updateURLBoxes(_ ranges: [Int: [Range<Int>]]) {
+    /// Places one box per row a URL covers, where the renderer draws that
+    /// row: `row * cell height - drawnOffsetY` below the view's top. While
+    /// the view follows the output that need not match the scroll offset.
+    func updateURLBoxes(_ ranges: [Int: [Range<Int>]], drawnOffsetY: CGFloat) {
         lastURLRanges = ranges
+        lastDrawnOffsetY = drawnOffsetY
         guard let color = urlBoxColor, highlightsURLs else {
             urlBoxContainer.isHidden = true
             return
@@ -313,7 +316,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 box.backgroundColor = fill
                 box.cornerRadius = min(6, cell.height / 3)
                 box.frame = CGRect(x: CGFloat(range.lowerBound) * cell.width - pad.width,
-                                   y: CGFloat(row) * cell.height - pad.height,
+                                   y: bounds.minY + CGFloat(row) * cell.height - drawnOffsetY - pad.height,
                                    width: CGFloat(range.count) * cell.width + pad.width * 2,
                                    height: cell.height + pad.height * 2)
                 index += 1

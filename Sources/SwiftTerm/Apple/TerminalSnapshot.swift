@@ -363,6 +363,17 @@ final class TerminalSnapshot {
     private(set) var rowsSkipped = 0
 #endif
 
+    /// The scroll offset the renderer draws this snapshot at: row `r` lands
+    /// at `r * cellHeight` minus this, in view coordinates. That is the
+    /// live offset while a person scrolls, and otherwise where a view that
+    /// follows the output rests: the top row's offset, or the bottom of the
+    /// content when that is reached first.
+    func drawnOffsetY (cellHeight: CGFloat, viewHeight: CGFloat, liveScrollOffsetY: CGFloat?) -> CGFloat {
+        let top = CGFloat(yDisp) * cellHeight
+        let resting = min(top, max(0, CGFloat(linesCount) * cellHeight - viewHeight))
+        return liveScrollOffsetY ?? resting
+    }
+
     func row (atAbsolute absoluteRow: Int) -> Row? {
         let index = absoluteRow - firstRow
         guard index >= 0, index < rows.count else { return nil }

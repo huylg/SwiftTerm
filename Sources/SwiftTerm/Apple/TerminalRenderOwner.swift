@@ -660,6 +660,10 @@ final class TerminalRenderOwner: Sendable {
         session.snapshot.completePendingBidi()
         update?.cursor = session.snapshot.cursor
         update?.urlRanges = session.snapshot.urlRanges
+        update?.drawnOffsetY = session.snapshot.drawnOffsetY(
+            cellHeight: request.viewState.cellDimension.height,
+            viewHeight: request.viewState.viewBounds.height,
+            liveScrollOffsetY: request.viewState.liveScrollOffsetY)
         let blinkRows = Self.blinkRows(in: session.snapshot)
         mailbox.publishBlinkRows(blinkRows)
         update?.blinkRows = blinkRows

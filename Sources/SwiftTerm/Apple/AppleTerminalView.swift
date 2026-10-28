@@ -3000,14 +3000,19 @@ extension TerminalView {
     func linkForClickLocked(at position: Position, hasCommandModifier: Bool) -> (link: String, params: [String:String])?
     {
         terminal.terminalLock.preconditionLocked()
-        let mode: Terminal.LinkLookupMode = highlightsURLs || implicitLinkCouldBeVisible(hasCommandModifier: hasCommandModifier)
+        // URLs shown all the time open exactly as drawn, read the same way.
+        if highlightsURLs,
+           terminal.linkMatch(at: .buffer(position), mode: .explicitOnly) == nil,
+           let url = terminal.implicitURL(at: position) {
+            return (url, [:])
+        }
+        let mode: Terminal.LinkLookupMode = implicitLinkCouldBeVisible(hasCommandModifier: hasCommandModifier)
             ? .explicitAndImplicit
             : .explicitOnly
         guard let match = terminal.linkMatch(at: .buffer(position), mode: mode) else {
             return nil
         }
-        let visibleURL = highlightsURLs && !match.isExplicit && Terminal.isImplicitURL(match.text)
-        guard visibleURL || linkVisibleForClick(match: match, hasCommandModifier: hasCommandModifier) else {
+        guard linkVisibleForClick(match: match, hasCommandModifier: hasCommandModifier) else {
             return nil
         }
         if match.isExplicit,
@@ -3941,6 +3946,9 @@ extension TerminalView {
         var cursorRowCount: Int
         /// The snapshot's plain-text URL columns, by absolute row.
         var urlRanges: [Int: [Range<Int>]] = [:]
+        /// The scroll offset the frame's rows are drawn at; see
+        /// `TerminalSnapshot.drawnOffsetY`.
+        var drawnOffsetY: CGFloat = 0
 
         init (region: CGRect?, rangeChanged: (start: Int, end: Int)?,
               notifyAccessibility: Bool, needsMetalDisplay: Bool,
@@ -4001,7 +4009,7 @@ extension TerminalView {
         applyFrameSideEffects(prepared.mainEffects)
         updateCursorPosition(from: prepared.cursor, rowCount: prepared.cursorRowCount)
 #if os(iOS) || os(visionOS)
-        updateURLBoxes(prepared.urlRanges)
+        updateURLBoxes(prepared.urlRanges, drawnOffsetY: prepared.drawnOffsetY)
 #endif
         submitFrameDraw(prepared)
     }

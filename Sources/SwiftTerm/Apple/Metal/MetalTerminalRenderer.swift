@@ -1913,10 +1913,8 @@ final class MetalTerminalRenderer {
         let cellHeight = context.cellDimension.height
         guard cellHeight > 0 else { return 0 }
         let top = CGFloat(snapshot.yDisp) * cellHeight
-        // Where a view that follows the output rests: the top row's offset,
-        // or the bottom of the content when that is reached first.
-        let resting = min(top, max(0, CGFloat(snapshot.linesCount) * cellHeight - context.viewBounds.height))
-        return (context.liveScrollOffsetY ?? resting) - top
+        return snapshot.drawnOffsetY(cellHeight: cellHeight, viewHeight: context.viewBounds.height,
+                                     liveScrollOffsetY: context.liveScrollOffsetY) - top
 #endif
     }
 

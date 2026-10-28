@@ -37,6 +37,36 @@ final class URLHighlightTests: TerminalDelegate {
         #expect(lower[1] == [0..<10])
     }
 
+    @Test func aListItemAfterAURLStaysApart() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 45, rows: 3))
+        terminal.feed(text: "  https://github.com/huylg/SwiftTerm/pull/6\r\n- rex-ios:\r\n")
+
+        let ranges = terminal.implicitURLRanges(rows: 0..<3)
+        #expect(ranges[0] == [2..<43])
+        #expect(ranges[1] == nil)
+        #expect(terminal.implicitURL(at: Position(col: 10, row: 0)) == "https://github.com/huylg/SwiftTerm/pull/6")
+    }
+
+    @Test func aListItemAfterAURLAtTheEdgeStaysApart() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 43, rows: 3))
+        terminal.feed(text: "  https://github.com/huylg/SwiftTerm/pull/6\r\n- rex-ios:\r\n")
+
+        let ranges = terminal.implicitURLRanges(rows: 0..<3)
+        #expect(ranges[0] == [2..<43])
+        #expect(ranges[1] == nil)
+    }
+
+    @Test func joinsAURLAProgramWrappedAtTheEdge() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 20, rows: 3))
+        // Hard line ends, as a program that wraps text itself writes them.
+        terminal.feed(text: "  https://example.co\r\n  m/a/b done\r\n")
+
+        let ranges = terminal.implicitURLRanges(rows: 0..<3)
+        #expect(ranges[0] == [2..<20])
+        #expect(ranges[1] == [2..<7])
+        #expect(terminal.implicitURL(at: Position(col: 3, row: 1)) == "https://example.com/a/b")
+    }
+
     @Test func recognizesURLSchemes() {
         #expect(Terminal.isImplicitURL("HTTPS://example.com"))
         #expect(!Terminal.isImplicitURL("mailto:me@example.com"))
