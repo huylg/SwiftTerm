@@ -1693,6 +1693,25 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         }
     }
 
+    /// When true, plain-text web URLs (`http://` and `https://`) are drawn
+    /// as links all the time, not just under the pointer, and activate on a
+    /// click or tap. Defaults to `false`.
+    public var highlightsURLs = false {
+        didSet {
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
+        }
+    }
+
+    /// Whether links are drawn with a dashed underline. Turn it off when
+    /// ``linkColor`` or a box already marks them. Defaults to `true`.
+    public var underlinesLinks = true {
+        didSet {
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
+        }
+    }
+
     /// The color used to draw link text and its underline, or `nil` (the
     /// default) to draw each link in its cell's own foreground color.
     ///

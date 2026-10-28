@@ -235,6 +235,113 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
 
+    /// When true, plain-text web URLs (`http://` and `https://`) are drawn
+    /// as links all the time, not just under the pointer, and activate on a
+    /// click or tap. Defaults to `false`.
+    public var highlightsURLs = false {
+        didSet {
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
+        }
+    }
+
+    /// The fill of the rounded box drawn behind each plain-text URL while
+    /// ``highlightsURLs`` is on, like links in a PDF viewer. `nil` (the
+    /// default) draws no box.
+    public var urlBoxColor: UIColor? {
+        didSet { updateURLBoxes(lastURLRanges, drawnOffsetY: lastDrawnOffsetY) }
+    }
+
+    /// How far each URL box reaches past its text, in points.
+    public var urlBoxPadding = CGSize(width: 3, height: 1)
+
+    private lazy var urlBoxContainer: UIView = {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.clipsToBounds = false
+        return view
+    }()
+    private var urlBoxLayers: [CALayer] = []
+    private var linkTapDelegate: LinkTapGestureDelegate?
+
+    /// The tap that opens links. It only begins near a link, and the view's
+    /// other taps wait for it to fail. A host with its own tap recognizers
+    /// should make them wait for it too, so a link tap does nothing else.
+    public private(set) var linkTapGestureRecognizer: UITapGestureRecognizer?
+    private var lastURLRanges: [Int: [Range<Int>]] = [:]
+    private var lastDrawnOffsetY: CGFloat = 0
+
+    /// Places one box per row a URL covers, where the renderer draws that
+    /// row: `row * cell height - drawnOffsetY` below the view's top. While
+    /// the view follows the output that need not match the scroll offset.
+    func updateURLBoxes(_ ranges: [Int: [Range<Int>]], drawnOffsetY: CGFloat) {
+        lastURLRanges = ranges
+        lastDrawnOffsetY = drawnOffsetY
+        guard let color = urlBoxColor, highlightsURLs else {
+            urlBoxContainer.isHidden = true
+            return
+        }
+        if urlBoxContainer.superview !== self {
+            if let metalView {
+                insertSubview(urlBoxContainer, aboveSubview: metalView)
+            } else {
+                addSubview(urlBoxContainer)
+            }
+        }
+        urlBoxContainer.isHidden = false
+        // Opaque boxes in a translucent container, so where padded boxes of
+        // neighboring rows overlap the tint stays even.
+        var alpha: CGFloat = 1
+        color.getRed(nil, green: nil, blue: nil, alpha: &alpha)
+        urlBoxContainer.alpha = alpha
+        let fill = color.withAlphaComponent(1).cgColor
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+
+        let cell = cellDimension
+        let pad = urlBoxPadding
+        var index = 0
+        for (row, columns) in ranges {
+            for range in columns {
+                let box: CALayer
+                if index < urlBoxLayers.count {
+                    box = urlBoxLayers[index]
+                } else {
+                    box = CALayer()
+                    urlBoxLayers.append(box)
+                    urlBoxContainer.layer.addSublayer(box)
+                }
+                box.isHidden = false
+                box.backgroundColor = fill
+                box.cornerRadius = min(6, cell.height / 3)
+                box.frame = CGRect(x: CGFloat(range.lowerBound) * cell.width - pad.width,
+                                   y: bounds.minY + CGFloat(row) * cell.height - drawnOffsetY - pad.height,
+                                   width: CGFloat(range.count) * cell.width + pad.width * 2,
+                                   height: cell.height + pad.height * 2)
+                index += 1
+            }
+        }
+        for box in urlBoxLayers[index...] {
+            box.isHidden = true
+        }
+    }
+
+    /// How far from a tap, in points, a link still counts as tapped. A cell
+    /// is smaller than a fingertip, so a tap that lands just beside a link
+    /// opens the nearest link within this distance. Defaults to 0: only the
+    /// cell under the tap.
+    public var linkTapRadius: CGFloat = 0
+
+    /// Whether links are drawn with a dashed underline. Turn it off when
+    /// ``linkColor`` or a box already marks them. Defaults to `true`.
+    public var underlinesLinks = true {
+        didSet {
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
+        }
+    }
+
     /// The color used to draw link text and its underline, or `nil` (the
     /// default) to draw each link in its cell's own foreground color.
     ///
@@ -1042,6 +1149,32 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         return result
     }
 
+    /// The link under `point`, or else the nearest one within
+    /// ``linkTapRadius``.
+    private func linkNearTap(at point: CGPoint) -> (link: String, params: [String: String])? {
+        let step: CGFloat = 4
+        let reach = Int((max(0, linkTapRadius) / step).rounded(.down))
+        var offsets: [CGPoint] = []
+        for dy in -reach...reach {
+            for dx in -reach...reach where dx * dx + dy * dy <= reach * reach {
+                offsets.append(CGPoint(x: CGFloat(dx) * step, y: CGFloat(dy) * step))
+            }
+        }
+        offsets.sort { $0.x * $0.x + $0.y * $0.y < $1.x * $1.x + $1.y * $1.y }
+        var tried: [Position] = []
+        for offset in offsets {
+            let sample = CGPoint(x: point.x + offset.x, y: point.y + offset.y)
+            guard offset == .zero || bounds.contains(sample) else { continue }
+            let hit = calculateTapHit(point: sample).grid
+            guard !tried.contains(hit) else { continue }
+            tried.append(hit)
+            if let result = linkForClick(at: hit, hasCommandModifier: commandActive) {
+                return result
+            }
+        }
+        return nil
+    }
+
     private func tapAction(tapCount: Int,
                            gestureRecognizer: UIGestureRecognizer) -> TerminalTapAction {
         withTerminal { terminal in
@@ -1060,10 +1193,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
               gestureRecognizer.state == .ended else { return }
 
         let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
-        if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive) {
-            terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
-            return
-        }
 
         // A tracking application owns the click even while the software keyboard is dismissed.
         // Spending the first tap only on focus makes TUI controls unreachable from a phone.
@@ -1549,6 +1678,34 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         singleTap.require(toFail: doubleTap)
         doubleTap.require(toFail: tripleTap)
+
+        // A tap on a link opens it as soon as the finger lifts. The other
+        // gestures wait for this one, which fails at once away from links,
+        // so a link never waits out a double tap or becomes a selection.
+        let linkTap = UITapGestureRecognizer(target: self, action: #selector(linkTapped(_:)))
+        let delegate = LinkTapGestureDelegate(terminalView: self)
+        linkTapDelegate = delegate
+        linkTap.delegate = delegate
+        addGestureRecognizer(linkTap)
+        linkTapGestureRecognizer = linkTap
+        for other in [singleTap, doubleTap, tripleTap] {
+            other.require(toFail: linkTap)
+        }
+        // A press held long enough selects instead; a short one has already
+        // failed it by the time the finger lifts, so this adds no delay.
+        linkTap.require(toFail: longPress)
+    }
+
+    @objc func linkTapped(_ gestureRecognizer: UITapGestureRecognizer)
+    {
+        guard gestureRecognizer.state == .ended,
+              let result = linkNearTap(at: gestureRecognizer.location(in: self)) else { return }
+        terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
+    }
+
+    /// Whether a touch at `point` would open a link.
+    func hasLinkNearTap(at point: CGPoint) -> Bool {
+        linkNearTap(at: point) != nil
     }
 
     func setupLinkReportingInteractions ()
@@ -3968,6 +4125,25 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 }
 
 @MainActor
+private final class LinkTapGestureDelegate: NSObject, UIGestureRecognizerDelegate {
+    private weak var terminalView: TerminalView?
+
+    init(terminalView: TerminalView) {
+        self.terminalView = terminalView
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let terminalView else { return false }
+        return terminalView.hasLinkNearTap(at: gestureRecognizer.location(in: terminalView))
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        // Never block scrolling: a drag that starts on a link still scrolls.
+        other is UIPanGestureRecognizer
+    }
+}
+
 private final class PointerScrollGestureDelegate: NSObject, UIGestureRecognizerDelegate {
     private weak var terminalView: TerminalView?
 

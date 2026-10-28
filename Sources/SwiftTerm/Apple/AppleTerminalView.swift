@@ -542,6 +542,8 @@ struct FrameViewState: Sendable {
     let linkHighlightRange: [Terminal.LinkMatch.RowRange]?
     let linkHighlightMode: LinkHighlightMode
     let commandActive: Bool
+    let highlightsURLs: Bool
+    let underlinesLinks: Bool
     let textBlinkVisible: Bool
     let notifyUpdateChanges: Bool
 
@@ -593,6 +595,8 @@ struct FrameViewState: Sendable {
         linkHighlightRange = view.linkHighlightRange
         linkHighlightMode = view.linkHighlightMode
         commandActive = view.commandActive
+        highlightsURLs = view.highlightsURLs
+        underlinesLinks = view.underlinesLinks
         textBlinkVisible = view.textBlinkVisible
         notifyUpdateChanges = view.notifyUpdateChanges
 
@@ -700,6 +704,11 @@ struct SnapshotRenderContext {
     let linkHighlightRange: [Terminal.LinkMatch.RowRange]?
     let linkHighlightMode: LinkHighlightMode
     let commandActive: Bool
+    /// The plain-text URL columns of each absolute row, drawn as links in
+    /// every mode. Empty unless the view's `highlightsURLs` is set.
+    let urlRanges: [Int: [Range<Int>]]
+    /// Whether link cells get a dashed underline.
+    let underlinesLinks: Bool
     let customBlockGlyphs: Bool
     let useBrightColors: Bool
     let minimumContrastRatio: CGFloat
@@ -716,7 +725,7 @@ struct SnapshotRenderContext {
     init (viewState: FrameViewState, snapshot: TerminalSnapshot) {
         self.init(viewState: viewState, style: snapshot.style,
                   nativeColors: snapshot.nativeColors(for: viewState.appearance),
-                  cols: snapshot.cols)
+                  cols: snapshot.cols, urlRanges: snapshot.urlRanges)
     }
 
     init (viewState: FrameViewState, style: SnapshotStyle, ansiColors: [Color],
@@ -734,11 +743,12 @@ struct SnapshotRenderContext {
                 caretTextColor: appearance.caretTextColor.nativeColor,
                 linkColor: appearance.linkColor?.nativeColor,
                 ansiColors: ansiColors.map(TTColor.make(color:))),
-            cols: cols)
+            cols: cols, urlRanges: [:])
     }
 
     private init (viewState: FrameViewState, style: SnapshotStyle,
-                  nativeColors: SnapshotNativeColors, cols: Int) {
+                  nativeColors: SnapshotNativeColors, cols: Int,
+                  urlRanges: [Int: [Range<Int>]]) {
         fonts = viewState.fonts
         cellDimension = viewState.cellDimension
         viewBounds = viewState.viewBounds
@@ -764,6 +774,8 @@ struct SnapshotRenderContext {
         linkHighlightRange = style.linkHighlightRange
         linkHighlightMode = style.linkHighlightMode
         commandActive = style.commandActive
+        self.urlRanges = urlRanges
+        underlinesLinks = viewState.underlinesLinks
         customBlockGlyphs = viewState.customBlockGlyphs
         useBrightColors = viewState.useBrightColors
         minimumContrastRatio = viewState.minimumContrastRatio
@@ -784,6 +796,7 @@ struct SnapshotRenderContext {
         identityHasher.combine(caretColor.hash)
         identityHasher.combine(caretTextColor.hash)
         identityHasher.combine(linkColor?.hash)
+        identityHasher.combine(underlinesLinks)
         for color in self.ansiColors {
             identityHasher.combine(color.hash)
         }
@@ -2987,6 +3000,12 @@ extension TerminalView {
     func linkForClickLocked(at position: Position, hasCommandModifier: Bool) -> (link: String, params: [String:String])?
     {
         terminal.terminalLock.preconditionLocked()
+        // URLs shown all the time open exactly as drawn, read the same way.
+        if highlightsURLs,
+           terminal.linkMatch(at: .buffer(position), mode: .explicitOnly) == nil,
+           let url = terminal.implicitURL(at: position) {
+            return (url, [:])
+        }
         let mode: Terminal.LinkLookupMode = implicitLinkCouldBeVisible(hasCommandModifier: hasCommandModifier)
             ? .explicitAndImplicit
             : .explicitOnly
@@ -3925,6 +3944,11 @@ extension TerminalView {
         /// Snapshot row count at prepare time, so placing the caret
         /// needs no second look at the snapshot.
         var cursorRowCount: Int
+        /// The snapshot's plain-text URL columns, by absolute row.
+        var urlRanges: [Int: [Range<Int>]] = [:]
+        /// The scroll offset the frame's rows are drawn at; see
+        /// `TerminalSnapshot.drawnOffsetY`.
+        var drawnOffsetY: CGFloat = 0
 
         init (region: CGRect?, rangeChanged: (start: Int, end: Int)?,
               notifyAccessibility: Bool, needsMetalDisplay: Bool,
@@ -3984,6 +4008,9 @@ extension TerminalView {
         guard let prepared = prepareFrame(viewState: viewState) else { return }
         applyFrameSideEffects(prepared.mainEffects)
         updateCursorPosition(from: prepared.cursor, rowCount: prepared.cursorRowCount)
+#if os(iOS) || os(visionOS)
+        updateURLBoxes(prepared.urlRanges, drawnOffsetY: prepared.drawnOffsetY)
+#endif
         submitFrameDraw(prepared)
     }
 
