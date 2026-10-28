@@ -1704,6 +1704,17 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         }
     }
 
+    /// When true, plain-text file and folder paths are drawn and activated
+    /// like ``highlightsURLs`` draws URLs. A tap hands the path, as written,
+    /// to `requestOpenLink`; resolving it is up to the delegate. Defaults to
+    /// `false`.
+    public var highlightsPaths = false {
+        didSet {
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
+        }
+    }
+
     /// The color used to draw link text and its underline, or `nil` (the
     /// default) to draw each link in its cell's own foreground color.
     ///
